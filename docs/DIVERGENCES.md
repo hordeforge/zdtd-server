@@ -205,6 +205,18 @@ section of `NetPackagePlayerInventory`, which goes through
 so the standalone package consumed a bool that was really the next slot's
 version byte.
 
+`NetPackageAnimateBlock` joined the length-trimmed relays on 2026-09-09. Stock
+`ProcessPackage` is client-only (`NetPackageAnimateBlock.il.txt:106`); the
+server only fans the body out. The body is `blockPosition` Vector3i (three
+i32), `animParamater` string, `animType` i32, `animationInteger` i32,
+`animationBool` bool (`read` IL=21, `NetPackageAnimateBlock.il.txt:54`).
+`animationTrigger` is a field but never written, so it is not read.
+`parseAnimateBlockBody` returns the consumed length and the relay forwards
+`body[0..wire_len]`. The parameters stay opaque: the server does not decide
+whether the door opens, it only proves the body is well formed. The door and
+hatch animation this carries is the one [rfc/0006-honk-doors.md](rfc/0006-honk-doors.md)
+section 2 separates from the still-missing horn package.
+
 ## 1a5. Relay audience audit (2026-09-09), five gaps closed
 
 Separate question from the body shapes above: not *what* is forwarded but *to
@@ -441,7 +453,7 @@ None of the 29 is a live gap, for one of three reasons:
   `NetPackageExplosionClient` on that path instead (`c2s/blocks.zig`), which is
   the same package stock sends from `Explosion` (RE `protocol-packages.md`
   6.15). Different package, correct behaviour.
-- **Client-side or editor features** with no headless source: `AnimateBlock`,
+- **Client-side or editor features** with no headless source:
   `AudioPlayInHead`, `DynamicMesh`, `Localization`, `ShowToolbeltMessage`,
   `Debug`, the `Editor*` and
   `Wall*` volume packages. Spelled out where a handler exists rather than only
@@ -655,12 +667,16 @@ peers in interest range. The requester gets stock's `Setup(blockPos, false)`
 answer. Ownership is enforced: outside any claim, or for someone else's claim,
 the request is an ownership reject.
 
-One conscious simplification, stated not glossed: stock's `repairBlock`
-(IL=135) consumes `RepairItems` from the TE storage in proportion to the
-damage fraction, and zdtd has no TE storage inventory, so the repair is free.
-Charging for it means the TE storage subsystem, which is a larger row. Air
-stays air on both sides - stock's loop skips it (`get_isair`), so destroyed
-blocks are not rebuilt here either.
+The charge matches stock's `repairBlock` (IL=135): the station's storage
+feature is the container at the keystone, and each damaged block costs
+`max(1, damage/MaxDamage * count * ResourceScale)` of every `RepairItems`
+entry, all-or-nothing. No storage, an empty list, or a short stack leaves
+the block damaged (IL_0006 and IL_004F return before the heal). Air stays
+air on both sides - stock's loop skips it (`get_isair`), so destroyed
+blocks are not rebuilt here either. The mesh-damage override (`RepairItemsMeshDamage`, used only at the last
+damage state of a model-entity shape, 136 stock doors) is not applied: zdtd
+does not track damage states, so those doors pay their plain `RepairItems`
+cost at every damage level.
 
 **A fourth zdtd-shaped body: vehicle control under `NetPackageVehicleSpawn`.**
 Found 2026-09-06 auditing the parsers with no golden test. zdtd sends and reads

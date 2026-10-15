@@ -456,6 +456,10 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
                 const sc = self.spitConfigFor(zdef.hand_item) orelse break :blk 0;
                 break :blk sc.block_damage;
             },
+            .projectile_ammo_id = blk: {
+                const sc = self.spitConfigFor(zdef.hand_item) orelse break :blk 0;
+                break :blk sc.ammo_id;
+            },
             .phys_resist = zdef.phys_resist,
             .flying = zdef.flying,
             .attack_damage = self.handItemDamage(zdef.hand_item),
@@ -524,6 +528,7 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
             .projectile_radius = if (self.spitConfigFor(adef.hand_item)) |sc| sc.radius else 0,
             .projectile_damage = if (self.spitConfigFor(adef.hand_item)) |sc| sc.damage else 0,
             .projectile_block_damage = if (self.spitConfigFor(adef.hand_item)) |sc| sc.block_damage else 0,
+            .projectile_ammo_id = if (self.spitConfigFor(adef.hand_item)) |sc| sc.ammo_id else 0,
             .flying = adef.flying,
             .attack_damage = self.handItemDamage(adef.hand_item),
             .time_stay = adef.time_stay,
@@ -628,6 +633,7 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
                 .projectile_radius = if (self.spitConfigFor(def.hand_item)) |sc| sc.radius else 0,
                 .projectile_damage = if (self.spitConfigFor(def.hand_item)) |sc| sc.damage else 0,
                 .projectile_block_damage = if (self.spitConfigFor(def.hand_item)) |sc| sc.block_damage else 0,
+                .projectile_ammo_id = if (self.spitConfigFor(def.hand_item)) |sc| sc.ammo_id else 0,
                 .flying = def.flying,
                 .attack_damage = self.handItemDamage(def.hand_item),
                 .block_chew = self.handItemBlockChew(def.hand_item),

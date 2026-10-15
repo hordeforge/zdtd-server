@@ -72,6 +72,15 @@ pub const DropEvent = enum { destroy, fall, harvest };
 /// inventory, overflow to the ground). The `tool_category` / `tag` fields
 /// are stored but never read by the roll (stock IL only reads name/count/
 /// prob/stickChance); they are the item-side bonus legs, recorded.
+/// One `RepairItems` entry (BlocksFromXml IL_07BA-0836): a nested
+/// `<property class="RepairItems"><property name="item" value="count"/>`.
+/// Stock `repairBlock` charges `max(1, damage/MaxDamage * count * ResourceScale)`
+/// of each, all-or-nothing, from the repair station's storage.
+pub const RepairItem = struct {
+    item_name: []const u8 = "",
+    count: u32 = 0,
+};
+
 pub const HarvestDrop = struct {
     /// Item name resolved via the item catalog. The IL specials "[recipe]"
     /// and "*" appear on no V3.1.0 b14 Harvest row and fail closed to a
@@ -500,6 +509,14 @@ pub const BlockDef = struct {
     /// Resolved `<drop event="Fall">` rows (falling-block debris, 587 stock
     /// rows; e.g. terrDestroyedStone crumbles into itself at prob .75).
     fall_drops: []const HarvestDrop = &.{},
+    /// `RepairItems` class (BlocksFromXml IL_07BA-0836): item name + count the
+    /// claim repair station consumes to heal this block. Empty = stock's
+    /// `repairBlock` returns before the heal (IL_004F-0052), so the block
+    /// stays damaged. Own declaration wins over Extends.
+    repair_items: []const RepairItem = &.{},
+    /// `ResourceScale` (Block.il field the repair cost multiplies by). 1 when
+    /// the block never declares it, which is the stock default.
+    resource_scale: f32 = 1,
     /// `<property name="Collide" ...>` blocking-type mask (stock
     /// `Block.BlockingType`), resolved through Extends. Absent at the end of
     /// the chain -> `collide_default` (255). Recorded only; see `collideMask`.
@@ -929,6 +946,8 @@ pub fn loadFromPath(
         harvest_drops: []const HarvestDrop = &.{},
         destroy_drops: []const HarvestDrop = &.{},
         fall_drops: []const HarvestDrop = &.{},
+        repair_items: []const RepairItem = &.{},
+        resource_scale: f32 = 1,
     };
     var parsed: std.ArrayList(Parsed) = .empty;
     defer parsed.deinit(allocator);
@@ -999,6 +1018,11 @@ pub fn loadFromPath(
         // `Explosion` class block window, set when its tag is seen.
         var explosion_from: usize = 0;
         var explosion_to: usize = 0;
+        // `RepairItems` class window: its children are the item/count pairs.
+        var repair_from: usize = 0;
+        var repair_to: usize = 0;
+        var own_repair: std.ArrayList(RepairItem) = .empty;
+        defer own_repair.deinit(allocator);
         var trader_id: i32 = -1;
         var extends: ?[]const u8 = null;
         var extends_param1: []const u8 = "";
@@ -1120,11 +1144,29 @@ pub fn loadFromPath(
                             explosion_to = std.mem.findPos(u8, clean, gt, "</property>") orelse body_end;
                         }
                     }
+                    // BlocksFromXml IL_07BA: GetClass("RepairItems") then one
+                    // entry per child property, name = key, value = count.
+                    if (std.ascii.eqlIgnoreCase(cn, "RepairItems")) {
+                        if (std.mem.findPos(u8, clean, pi, ">")) |gt| {
+                            repair_from = gt + 1;
+                            repair_to = std.mem.findPos(u8, clean, gt, "</property>") orelse body_end;
+                        }
+                    }
                 }
                 p = pi + 10;
                 continue;
             };
-            if (explosion_to > explosion_from and pi >= explosion_from and pi < explosion_to) {
+            if (repair_to > repair_from and pi >= repair_from and pi < repair_to) {
+                if (xml.attr(clean, pi, "value")) |v| {
+                    const n = std.fmt.parseInt(u32, v, 10) catch 0;
+                    if (n > 0 and own_repair.items.len < max_harvest_drops) {
+                        try own_repair.append(allocator, .{
+                            .item_name = try arena.dupe(u8, pname),
+                            .count = n,
+                        });
+                    }
+                }
+            } else if (explosion_to > explosion_from and pi >= explosion_from and pi < explosion_to) {
                 const v = xml.attr(clean, pi, "value") orelse "";
                 if (std.mem.eql(u8, pname, "RadiusBlocks")) {
                     if (xml.parseF32(v)) |f| explosion_radius_blocks = f;
@@ -1412,6 +1454,8 @@ pub fn loadFromPath(
             .harvest_drops = own_drop_slice,
             .destroy_drops = own_destroy_slice,
             .fall_drops = own_fall_slice,
+            .repair_items = try arena.dupe(RepairItem, own_repair.items),
+            .resource_scale = resource_scale,
         });
         i = bi + 7;
     }
@@ -1491,6 +1535,11 @@ pub fn loadFromPath(
         var own_drops = pb.harvest_drops;
         var own_destroy = pb.destroy_drops;
         var own_fall = pb.fall_drops;
+        // RepairItems follows the chain only when the block declares none of
+        // its own: stock reads the class from the resolved property set, so an
+        // own class replaces the parent's instead of merging into it.
+        var own_repair = pb.repair_items;
+        var own_scale = pb.resource_scale;
         var ext = pb.extends;
         while (ext) |e| : (depth += 1) {
             if (depth >= max_extends_depth) break;
@@ -1631,6 +1680,8 @@ pub fn loadFromPath(
                 own_destroy = try mergeDrops(arena, own_destroy, base_p.destroy_drops);
                 own_fall = try mergeDrops(arena, own_fall, base_p.fall_drops);
             }
+            if (own_repair.len == 0) own_repair = base_p.repair_items;
+            if (own_scale == 1) own_scale = base_p.resource_scale;
             ext = base_p.extends;
         }
         pb.class = own_class;
@@ -1693,6 +1744,8 @@ pub fn loadFromPath(
         pb.harvest_drops = own_drops;
         pb.destroy_drops = own_destroy;
         pb.fall_drops = own_fall;
+        pb.repair_items = own_repair;
+        pb.resource_scale = own_scale;
     }
 
     // Block.assignIdsLinear -> assignLeftOverBlocks: every name the dump
@@ -1802,6 +1855,8 @@ pub fn loadFromPath(
             .harvest_drops = pb.harvest_drops,
             .destroy_drops = pb.destroy_drops,
             .fall_drops = pb.fall_drops,
+            .repair_items = pb.repair_items,
+            .resource_scale = pb.resource_scale,
         };
     }
     return .{ .defs = defs, .arena_ptr = arena_holder, .source = .xml };

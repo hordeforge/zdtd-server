@@ -397,9 +397,9 @@ fn appendPassive(
     const en = xml.attr(body, tag, "name") orelse return;
     const op_s = xml.attr(body, tag, "operation") orelse "base_add";
     const val_s = xml.attr(body, tag, "value") orelse "0";
-    var curve: [buffs.max_curve_len]f32 = .{0} ** buffs.max_curve_len;
+    var curve: [buffs.max_curve_len]f32 = @splat(0);
     const curve_len = buffs.parseCurveValue(val_s, &curve);
-    var curve_levels: [buffs.max_curve_len]f32 = .{0} ** buffs.max_curve_len;
+    var curve_levels: [buffs.max_curve_len]f32 = @splat(0);
     const curve_levels_len = buffs.parseAnchors(body, tag, &curve_levels);
     try pool.append(allocator, .{
         .name = try arena.dupe(u8, en),
@@ -808,7 +808,7 @@ pub fn loadTableFromPath(allocator: std.mem.Allocator, path: []const u8) !Table 
             const dgt = std.mem.findPos(u8, body, di, ">") orelse break;
             // Each display_entry owns its tier->level list; its unlock_entries
             // resolve against it (a later display_entry's list does not leak).
-            var tier_levels: [8]u8 = .{0} ** 8;
+            var tier_levels: [8]u8 = @splat(0);
             if (xml.attr(body, di, "unlock_level")) |ul| {
                 var t: usize = 0;
                 var it = std.mem.splitScalar(u8, ul, ',');

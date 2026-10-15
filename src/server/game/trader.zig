@@ -263,7 +263,7 @@ pub fn fillTraderFromXml(self: *Game, trader_net_id: i32) void {
         // `createDefaultModItems` (items.md 324) rolls the mod names; only the
         // item table can turn a name into an id, so the resolution happens here
         // rather than in the pure `traders.zig` roll.
-        var mods: [4]u16 = .{0} ** 4;
+        var mods: [4]u16 = @splat(0);
         var mod_n: u8 = 0;
         for (r.mod_names[0..r.mod_n]) |mname| {
             if (mod_n >= mods.len) break;

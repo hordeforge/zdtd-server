@@ -994,8 +994,8 @@ test "RWG water table fills basins to the stock surface cell, not shores" {
     // RE: Block.cWaterLevel 62.88 (stock_facts world_water_level) - the table
     // fills cells 0..62, surface cell 62. A basin (bed h=50) gets water
     // 51..62 with air above; terrain at or above the surface cell stays dry.
-    var heights: [256]u8 = [_]u8{0} ** 256;
-    var blocks: [16 * 256 * 16]u32 = [_]u32{assignids.air} ** (16 * 256 * 16);
+    var heights: [256]u8 = @splat(0);
+    var blocks: [16 * 256 * 16]u32 = @splat(assignids.air);
     for (heights, 0..) |_, col| {
         heights[col] = 50;
     }
@@ -1006,17 +1006,17 @@ test "RWG water table fills basins to the stock surface cell, not shores" {
     try std.testing.expectEqual(assignids.air, blocks[col + 63 * 256]);
     try std.testing.expectEqual(assignids.air, blocks[col + 50 * 256]); // bed stays terrain
     // Shores: surface at the cell, and above it, stay dry.
-    var dry_heights: [256]u8 = [_]u8{0} ** 256;
+    var dry_heights: [256]u8 = @splat(0);
     dry_heights[0] = 62;
     dry_heights[1] = 70;
-    var dry_blocks: [16 * 256 * 16]u32 = [_]u32{assignids.air} ** (16 * 256 * 16);
+    var dry_blocks: [16 * 256 * 16]u32 = @splat(assignids.air);
     WorldGen.fillWaterTable(&dry_heights, &dry_blocks, assignids.water, assignids.air);
     try std.testing.expectEqual(assignids.air, dry_blocks[0 + 63 * 256]);
     try std.testing.expectEqual(assignids.air, dry_blocks[256 + 63 * 256]);
     // Existing solids (a carved shelf) are never overwritten.
-    var shelf_heights: [256]u8 = [_]u8{0} ** 256;
+    var shelf_heights: [256]u8 = @splat(0);
     shelf_heights[0] = 50;
-    var shelf_blocks: [16 * 256 * 16]u32 = [_]u32{assignids.air} ** (16 * 256 * 16);
+    var shelf_blocks: [16 * 256 * 16]u32 = @splat(assignids.air);
     shelf_blocks[0 + 55 * 256] = assignids.terr_stone;
     WorldGen.fillWaterTable(&shelf_heights, &shelf_blocks, assignids.water, assignids.air);
     try std.testing.expectEqual(assignids.terr_stone, shelf_blocks[0 + 55 * 256]);

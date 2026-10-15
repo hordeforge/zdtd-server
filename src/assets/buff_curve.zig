@@ -16,7 +16,7 @@ pub fn firstF32(s: []const u8) f32 {
 /// Parse a comma-separated ModifyCVar value curve (spear-hunter metabolism
 /// rows) into a fixed array; level i reads value[i] (1-based).
 pub fn parseValueList(s: []const u8) struct { list: [16]f32, n: u8 } {
-    var out = [_]f32{0} ** 16;
+    var out: [16]f32 = @splat(0);
     var n: u8 = 0;
     if (s.len == 0) return .{ .list = out, .n = 0 };
     var it = std.mem.splitScalar(u8, s, ',');
@@ -32,7 +32,7 @@ pub fn parseValueList(s: []const u8) struct { list: [16]f32, n: u8 } {
 
 /// Parse a comma-separated `weights=` list into a fixed array (fireOneBuff).
 pub fn parseWeights(s: []const u8) [16]f32 {
-    var out = [_]f32{0} ** 16;
+    var out: [16]f32 = @splat(0);
     if (s.len == 0) return out;
     var it = std.mem.splitScalar(u8, s, ',');
     var i: usize = 0;

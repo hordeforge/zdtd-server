@@ -250,7 +250,7 @@ test "flusher writes every submitted payload" {
         var pbuf: [std.Io.Dir.max_path_bytes]u8 = undefined;
         const p = try std.fmt.bufPrint(&pbuf, "{s}/f_{d}.bin", .{ dir, i });
         const path = try dupPage(p);
-        const payload = try dupPage(&[_]u8{@intCast(i)} ** 4);
+        const payload = try dupPage(&[_]u8{@intCast(i)});
         try f.submit(@intCast(i), path, payload);
     }
     f.waitAll();
@@ -263,7 +263,7 @@ test "flusher writes every submitted payload" {
         const p = try std.fmt.bufPrint(&pbuf, "{s}/f_{d}.bin", .{ dir, i });
         const data = try io_fs.readFileAll(testing.allocator, p);
         defer testing.allocator.free(data);
-        try testing.expectEqualSlices(u8, &[_]u8{@intCast(i)} ** 4, data);
+        try testing.expectEqualSlices(u8, &[_]u8{@intCast(i)}, data);
     }
 }
 
@@ -355,7 +355,7 @@ test "flusher atomic attacker publish" {
     // Mirrors the parallel AI attacker-slot publish (systems.AiCtx): concurrent
     // stores to one victim index must not tear under the memory model.
     if (builtin.single_threaded) return;
-    var slots: [64]u16 = .{std.math.maxInt(u16)} ** 64;
+    var slots: [64]u16 = @splat(std.math.maxInt(u16));
     const victim: usize = 7;
     var ready: std.atomic.Value(u8) = .init(0);
     var go: std.atomic.Value(bool) = .init(false);

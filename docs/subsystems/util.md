@@ -54,18 +54,18 @@ pub const XorShift32 = struct {
 
 `init` rewrites a zero seed to 1 so no stream is dead (`src/util/rng.zig:14`), `initFromU64` folds a run seed through a SplitMix64 finalizer (`src/util/rng.zig:19`), and `initFromNetId` gives each entity its own wander stream (`src/util/rng.zig:29`). `nextBounded` is documented as biased modulo reduction and explicitly not for fair draws (`src/util/rng.zig:41`). `xorshift32Step` is the stateless form for call sites that store state in a component field (`src/util/rng.zig:55`).
 
-`game_random.zig` is the stock-matching generator, and it exists to reproduce draws the client also makes. `GameRandom` is the .NET `System.Random` algorithm verbatim, including the 56-entry `SeedArray`, `MBIG` 2147483647, `MSEED` 161803398 and the `4.6566128752458E-10` sample scale (`src/util/game_random.zig:1`). Its state is the whole structure (`src/util/game_random.zig:16`):
+`game_random.zig` is the stock-matching generator, and it exists to reproduce draws the client also makes. `GameRandom` is the .NET `System.Random` algorithm verbatim, including the 56-entry `SeedArray`, `MBIG` 2147483647, `MSEED` 161803398 and the `4.6566128752458E-10` sample scale (`src/util/game_random.zig:16`). Its state is the whole structure (`src/util/game_random.zig:16`):
 
 ```zig
 pub const GameRandom = struct {
     /// `SeedArray` (ctor allocates 56, IL=5); index 0 is unused by the
     /// algorithm, which works 1..55.
-    seed_array: [56]i32 = [_]i32{0} ** 56,
+    seed_array: [56]i32 = @splat(0),
     inext: i32 = 0,
     inextp: i32 = 0,
 ```
 
-The API mirrors the IL it ports: `setSeed` (`src/util/game_random.zig:36`), `internalSample` with the `== MBIG` decrement (`:69`), `sample`/`nextDouble`, `nextFloat`, `next` (`:86`, `:90`, `:95`, `:100`), `nextBelow` and `nextRange` including the large-range path (`:105`, `:111`), and `getSampleForLargeRange` (`:120`). Per-position streams come from the stock fold (`src/util/game_random.zig:151`):
+The API mirrors the IL it ports: `setSeed` (`src/util/game_random.zig:148`), `internalSample` with the `== MBIG` decrement (`:69`), `sample`/`nextDouble`, `nextFloat`, `next` (`:86`, `:90`, `:95`, `:100`), `nextBelow` and `nextRange` including the large-range path (`:105`, `:111`), and `getSampleForLargeRange` (`:120`). Per-position streams come from the stock fold (`src/util/game_random.zig:151`):
 
 ```zig
 pub fn seededOnPos(x: i32, y: i32, z: i32, seed: i32) GameRandom {

@@ -26,7 +26,7 @@ pub const Event = struct {
 
 /// Overwrite ring of the last `capacity` successful inv mutations.
 pub const Ledger = struct {
-    events: [capacity]Event = [_]Event{.{}} ** capacity,
+    events: [capacity]Event = @splat(.{}),
     /// Next write index (mod capacity).
     head: u8 = 0,
     /// How many slots hold a real event (0..capacity).

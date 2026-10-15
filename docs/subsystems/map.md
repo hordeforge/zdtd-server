@@ -27,7 +27,7 @@ The DEM leg is a separate codec with no streaming layer: Copernicus GLO-30 COG h
 
 ## Prefab index, footprints and YOffset
 
-`prefabs.xml` is parsed once into `Index`: names are interned into one owned buffer, and sizes are probed from each prefab's `.tts` header (`magic "tts\0"`, version `u32`, then `sx/sy/sz` as `u16`) under `POIs`, `Parts`, or `RWGTiles` (`src/world/prefabs.zig:157`, `src/world/prefabs.zig:712`). A prefab whose `.tts` is missing gets `4x2x4` when it is a `part_*` and `16x8x16` otherwise (`src/world/prefabs.zig:712`). The per-decoration record (`src/world/prefabs.zig:712`, methods elided):
+`prefabs.xml` is parsed once into `Index`: names are interned into one owned buffer, and sizes are probed from each prefab's `.tts` header (`magic "tts\0"`, version `u32`, then `sx/sy/sz` as `u16`) under `POIs`, `Parts`, or `RWGTiles` (`src/world/prefabs.zig:167`, `src/world/prefabs.zig:712`). A prefab whose `.tts` is missing gets `4x2x4` when it is a `part_*` and `16x8x16` otherwise (`src/world/prefabs.zig:712`). The per-decoration record (`src/world/prefabs.zig:712`, methods elided):
 
 ```zig
 pub const Decoration = struct {
@@ -47,7 +47,7 @@ pub const Decoration = struct {
 
 Two vertical rules matter more than the field list. `stampY()` adds `y_offset` only when `y_is_ground` is set, so a cave that pins an absolute Y keeps it (`src/world/prefabs.zig:175`); `YOffset` is read by exact property-name match because the same file carries `DistantPOIYOffset`, and every parse failure returns 0 like `DynamicProperties::GetInt` (`src/world/prefabs.zig:175`). The terrain pad is a different value: `applyToChunkHeights` flattens to the declared ground minus one block for a full POI (the level stock's `dtm_processed.raw` already carries) and to plain ground for parts, and raises rather than lowers when `y_is_ground` is false (`src/world/prefabs.zig:175`). Footprint bounds swap X and Z for rotations 1 and 3 (`src/world/prefabs.zig:175`), and `part_*` names are never quest POIs (`src/world/prefabs.zig:175`).
 
-Per-decorating metadata is lazily cached in `questData` from the prefab's own `.xml`: `QuestTags`, `DifficultyTier`, `AllowDecorations`, the `Tags` property as `poi_tags`, a `has_sleepers` flag set when `SleeperVolumeSize` exists, the trader NPC cell from the `IndexedBlockOffsets class="Trader"` entry, `ThemeTags`, and the trader-area protect padding and teleport volumes (`src/world/prefabs.zig:20`, `src/world/prefabs.zig:548`). The `QuestData` fields (`src/world/prefabs.zig:548`, remainder elided):
+Per-decorating metadata is lazily cached in `questData` from the prefab's own `.xml`: `QuestTags`, `DifficultyTier`, `AllowDecorations`, the `Tags` property as `poi_tags`, a `has_sleepers` flag set when `SleeperVolumeSize` exists, the trader NPC cell from the `IndexedBlockOffsets class="Trader"` entry, `ThemeTags`, and the trader-area protect padding and teleport volumes (`src/world/prefabs.zig:21`, `src/world/prefabs.zig:548`). The `QuestData` fields (`src/world/prefabs.zig:548`, remainder elided):
 
 ```zig
 pub const QuestData = struct {
@@ -102,7 +102,7 @@ Painting has three behaviors worth knowing before changing it: blockplaceholders
 
 ## Sleeper volumes
 
-Sleeper volumes are parsed from each placed prefab's XML, not from the world store, and the resulting `Store` is the sim's whole sleeper model. The volume record (`src/world/sleepers.zig:28`, methods and later fields elided):
+Sleeper volumes are parsed from each placed prefab's XML, not from the world store, and the resulting `Store` is the sim's whole sleeper model. The volume record (`src/world/sleepers.zig:36`, methods and later fields elided):
 
 ```zig
 pub const Volume = struct {
@@ -113,7 +113,7 @@ pub const Volume = struct {
     x1: i32 = 0,
     y1: i32 = 0,
     z1: i32 = 0,
-    groups: [max_group_classes]VolumeGroup = [_]VolumeGroup{.{}} ** max_group_classes,
+    groups: [max_group_classes]VolumeGroup = @splat(.{}),
     group_n: u8 = 0,
 ```
 
@@ -144,7 +144,7 @@ pub const BiomeMap = struct {
 
 `parsePng` is a minimal decoder: 8-bit RGB or RGBA, non-interlaced, filters 0 through 4, zlib IDAT inflate, and a 16384 edge cap that also guards the raw-size math (`src/world/biomes.zig:290`, `src/world/biomes.zig:288`). `atWorld` flips Z because PNG row 0 is north and divides by `scale` (`src/world/biomes.zig:236`); `chunkDominant` counts only ids below 50, matching stock's `int[50]` (`src/world/biomes.zig:247`). `World` sets `scale` from the DTM width over the PNG width after load (`src/world/store.zig:780`). Consumers use the dominant id for the chunk wire header and `atWorld` for the per-cell channel (`src/server/game/chunk_fill.zig:57`, `src/server/game/chunk_fill.zig:177`).
 
-Subbiome resolution is a clean-room port of `PerlinNoise` plus `GetSubBiomeIdxAt`, seeded from `GetStableHashCode(worldName)` (`src/world/subbiome_noise.zig:1`, `src/server/game.zig:1199`). The window record (`src/world/subbiome_noise.zig:207`):
+Subbiome resolution is a clean-room port of `PerlinNoise` plus `GetSubBiomeIdxAt`, seeded from `GetStableHashCode(worldName)` (`src/world/subbiome_noise.zig:143`, `src/server/game.zig:1199`). The window record (`src/world/subbiome_noise.zig:207`):
 
 ```zig
 pub const SubBiome = struct {

@@ -272,7 +272,7 @@ pub const BiomeMap = struct {
         const base_x = cx * 16;
         const base_z = cz * 16;
         // CalcDominantBiome uses int[50]; only count valid ids.
-        var counts: [50]u16 = .{0} ** 50;
+        var counts: [50]u16 = @splat(0);
         var lz: i32 = 0;
         while (lz < 16) : (lz += 1) {
             var lx: i32 = 0;

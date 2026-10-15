@@ -150,17 +150,17 @@ test "the quality axis evaluates item rows at the item's tier" {
     // (PassiveEffect::ParsePassiveEffect IL_01D3 / IL_026C / IL_0304), each
     // branch jumping past the attributes after it.
     const tier_row = "<passive_effect name=\"PhysicalDamageResist\" operation=\"base_add\" value=\"8,12.3\" tier=\"1,6\"/>";
-    var tl: [max_curve_len]f32 = .{0} ** max_curve_len;
+    var tl: [max_curve_len]f32 = @splat(0);
     try std.testing.expectEqual(@as(u8, 2), parseAnchors(tier_row, 0, &tl));
     try std.testing.expectApproxEqAbs(@as(f32, 1), tl[0], 0.001);
     try std.testing.expectApproxEqAbs(@as(f32, 6), tl[1], 0.001);
     const all_three = "<passive_effect name=\"x\" value=\"1\" level=\"1,5\" tier=\"2,6\" duration=\"0,20\"/>";
-    var al: [max_curve_len]f32 = .{0} ** max_curve_len;
+    var al: [max_curve_len]f32 = @splat(0);
     try std.testing.expectEqual(@as(u8, 2), parseAnchors(all_three, 0, &al));
     try std.testing.expectApproxEqAbs(@as(f32, 1), al[0], 0.001);
     try std.testing.expectApproxEqAbs(@as(f32, 5), al[1], 0.001); // level=, not tier=/duration=
     const duration_row = "<passive_effect name=\"x\" value=\"1,5\" duration=\"0,3,60\"/>";
-    var dl: [max_curve_len]f32 = .{0} ** max_curve_len;
+    var dl: [max_curve_len]f32 = @splat(0);
     try std.testing.expectEqual(@as(u8, 3), parseAnchors(duration_row, 0, &dl));
     try std.testing.expectApproxEqAbs(@as(f32, 60), dl[2], 0.001);
 }
@@ -646,7 +646,7 @@ test "stageBuffName maps stages to the stock conditional buff names" {
 }
 
 test "parseCurveValue fills per-level segments; curveAt clamps and levels" {
-    var c: [max_curve_len]f32 = .{0} ** max_curve_len;
+    var c: [max_curve_len]f32 = @splat(0);
     const n = parseCurveValue(".011,.022,.05,.1,.16", &c);
     try std.testing.expectEqual(@as(u8, 5), n);
     try std.testing.expectApproxEqAbs(@as(f32, 0.011), c[0], 0.0001);
@@ -672,7 +672,7 @@ test "parseCurveValue fills per-level segments; curveAt clamps and levels" {
     const two = Passive{ .curve = .{ 2, 4, 0, 0, 0, 0, 0, 0 }, .curve_len = 2 };
     try std.testing.expectApproxEqAbs(@as(f32, 3), curveAt(two, 1), 0.0001);
     // Single-segment rows repeat the flat value.
-    var c1: [max_curve_len]f32 = .{0} ** max_curve_len;
+    var c1: [max_curve_len]f32 = @splat(0);
     _ = parseCurveValue("1.5", &c1);
     const p1 = Passive{ .curve = c1, .curve_len = 1 };
     try std.testing.expectApproxEqAbs(@as(f32, 1.5), curveAt(p1, 3), 0.0001);
@@ -1103,7 +1103,7 @@ test "stagesFromWanted derives the stage set from engine names" {
 
 test "explicit level= curve pairs evaluate piecewise-linearly" {
     // progression.xml's dominant form: level="1,5" value="2,10".
-    var lv: [max_curve_len]f32 = .{0} ** max_curve_len;
+    var lv: [max_curve_len]f32 = @splat(0);
     const n = parseCurveLevels("1,5", &lv);
     try std.testing.expectEqual(@as(u8, 2), n);
     try std.testing.expectApproxEqAbs(@as(f32, 1), lv[0], 0.001);

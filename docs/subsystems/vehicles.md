@@ -37,7 +37,7 @@ pub const VehicleKind = enum(u8) {
 ```
 
 Seat storage is a fixed array of rider net ids, so the component has no heap and no unbounded rider
-list (`src/ecs/components.zig:495`):
+list (`src/ecs/components.zig:776`):
 
 ```zig
 pub const Vehicle = struct {
@@ -46,7 +46,7 @@ pub const Vehicle = struct {
     fuel: f32 = 100,
     /// Rider net id per seat, -1 when free. Index is the wire slot carried by
     /// NetPackageEntityAttach (asm.il:844620).
-    seats: [max_seats]i32 = [_]i32{-1} ** max_seats,
+    seats: [max_seats]i32 = @splat(-1),
     /// Usable seats, always clamped to 1..max_seats on spawn.
     seat_count: u8 = 1,
 ```

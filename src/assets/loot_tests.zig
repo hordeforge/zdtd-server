@@ -428,7 +428,7 @@ test "loot entry buffs are reported only for spawned entries" {
 
     const Rec = struct {
         n: usize = 0,
-        names: [8][]const u8 = .{""} ** 8,
+        names: [8][]const u8 = @splat(""),
         fn add(ctx: ?*anyopaque, name: []const u8) void {
             const r: *@This() = @ptrCast(@alignCast(ctx.?));
             if (r.n < r.names.len) {

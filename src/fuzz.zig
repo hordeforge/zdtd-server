@@ -222,7 +222,7 @@ const package_corpus = [_][]const u8{
     // land claim repair: xyz + begin
     &.{ 0, 0, 0, 0, 61, 0, 0, 0, 0, 0, 0, 0, 1 },
     // chunk body: cx,cz,pad + 256 heights zeros
-    &([_]u8{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 } ++ ([_]u8{0} ** 256)),
+    &([_]u8{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 } ++ @as([256]u8, @splat(0))),
     // login: "Bot" + two null PUIDs + empty tokens + versions + discord u64
     &.{ 3, 'B', 'o', 't', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
     // login: name + present Steam PUID (present, version, "Steam", "1")
@@ -258,7 +258,7 @@ const package_corpus = [_][]const u8{
     // item action effects: eid | slot | action | firing | no vectors | user_data
     &.{ 106, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
     // item action effects with start/direction Vector3 tails
-    &([_]u8{ 106, 0, 0, 0, 0, 0, 1, 1 } ++ ([_]u8{0} ** 24) ++ [_]u8{ 7, 0, 0, 0 }),
+    &([_]u8{ 106, 0, 0, 0, 0, 0, 1, 1 } ++ @as([24]u8, @splat(0)) ++ [_]u8{ 7, 0, 0, 0 }),
 };
 
 test "fuzz variable-length C2S package decoders" {
@@ -796,7 +796,7 @@ const admin_corpus = [_][]const u8{
     "kick ",
     "give 999999999999999999 1 1",
     "tele 0 1e39 0 0",
-    "say " ++ ("x" ** 200),
+    "say " ++ @import("util/root.zig").repeat("x", 200),
     "\x00kick 0",
     "KICK 0",
     " help",
@@ -827,8 +827,8 @@ const map_xml_corpus = [_][]const u8{
     "<spawnpoint position=\"1,2,3,4\"/>",
     // nested / truncated
     "<a><b position=\"1,2,3\"/></a>",
-    "position=\"" ++ ("9" ** 40) ++ ",1,1\"",
-    "HeightMapSize" ++ ("x" ** 100) ++ "value=\"1,1\"",
+    "position=\"" ++ @import("util/root.zig").repeat("9", 40) ++ ",1,1\"",
+    "HeightMapSize" ++ @import("util/root.zig").repeat("x", 100) ++ "value=\"1,1\"",
 };
 
 test "fuzz map XML size and spawn parsers" {
@@ -1032,13 +1032,13 @@ const cog_corpus = [_][]const u8{
     // minimal TIFF LE header, IFD at 8, zero entries
     "II*\x00\x08\x00\x00\x00\x00\x00",
     // IFD with huge entry count (bounds check)
-    "II*\x00\x08\x00\x00\x00\xff\xff" ++ ("\x00" ** 64),
+    "II*\x00\x08\x00\x00\x00\xff\xff" ++ @import("util/root.zig").repeat("\x00", 64),
     // zlib header only (decodeTile: truncated stream must reject, not hang)
     "\x78\x9c",
     // valid short zlib stream (decompresses to less than a full tile)
     &frame_zlib_hello,
     // zlib header followed by garbage
-    "\x78\x9c" ++ ("\xff" ** 32),
+    "\x78\x9c" ++ @import("util/root.zig").repeat("\xff", 32),
 };
 
 // decodeTile output is tile_px^2 f32 (4 MiB); keep it off the fuzz stack and
@@ -1106,12 +1106,12 @@ const xml_patch_corpus = [_][]const u8{
     // adversarial xpath depth / empty segments / unclosed filters
     "//////////",
     "/blocks/block[@name='",
-    "/blocks/block[@name='stone']/@" ++ ("a" ** 64),
+    "/blocks/block[@name='stone']/@" ++ @import("util/root.zig").repeat("a", 64),
     // nested ops + junk
     \\<set xpath="/blocks"><remove xpath="/"/></set>
     ,
     // huge claimed attribute value
-    "<set xpath=\"/blocks/block[@name='stone']/@value\">" ++ ("Z" ** 200) ++ "</set>",
+    "<set xpath=\"/blocks/block[@name='stone']/@value\">" ++ @import("util/root.zig").repeat("Z", 200) ++ "</set>",
 };
 
 test "fuzz config XML patch xpath and apply" {
@@ -1160,8 +1160,8 @@ const weather_xml_corpus = [_][]const u8{
     "<weather name=\"storm\"",
     "<weathermap name=\"x\"></weathermap>",
     "<weather prob=\"nan\" duration=\"-1\" delay=\"inf,nan\"><Fog min=\"nan\" max=\"1e40\"/></weather>",
-    "<weather name=\"" ++ ("s" ** 80) ++ "\"><Wind range=\",\"/></weather>",
-    "<weather/>" ** 40,
+    "<weather name=\"" ++ @import("util/root.zig").repeat("s", 80) ++ "\"><Wind range=\",\"/></weather>",
+    &@import("util/root.zig").repeat("<weather/>", 40),
 };
 
 test "fuzz biomes.xml weather group parser" {
@@ -1250,7 +1250,7 @@ const gsi_corpus = [_][]const u8{
     "zdtd",
     "name;with:colons\r\ninjection",
     "evil\nGameType:HACK;",
-    "x" ** 128,
+    &@import("util/root.zig").repeat("x", 128),
     "Navezgane",
     "127.0.0.1",
     "\x00\xff;Port:1;\r\n",
@@ -1308,8 +1308,8 @@ const serverconfig_corpus = [_][]const u8{
     \\  <property name="ServerPasssword" value="typo"/>
     \\</ServerSettings>
     ,
-    "<property name=\"ServerPort\" value=\"" ++ ("9" ** 40) ++ "\"/>",
-    "<property name=\"GameName\" value=\"" ++ ("x" ** 200) ++ "\"/>",
+    "<property name=\"ServerPort\" value=\"" ++ @import("util/root.zig").repeat("9", 40) ++ "\"/>",
+    "<property name=\"GameName\" value=\"" ++ @import("util/root.zig").repeat("x", 200) ++ "\"/>",
     // truncated / nested noise
     "<property name=\"ServerPort\"",
     "property name=ServerPort value=1",
@@ -1341,7 +1341,7 @@ const water_xml_corpus = [_][]const u8{
     ,
     "<Water pos=\"0,0,0\"/>",
     "pos=\"1, 2, 3\" pos=\"a,b,c\" pos=\"1\"",
-    "pos=\"" ++ ("9" ** 20) ++ ",1,1\"",
+    "pos=\"" ++ @import("util/root.zig").repeat("9", 20) ++ ",1,1\"",
     "pos=\"  -1 ,  61 ,  2 \"",
     "pos=\"\x00,1,2\"",
 };
@@ -1409,7 +1409,7 @@ const zsg_corpus = [_][]const u8{
     &([_]u8{ 'Z', 'S', 'G', '1', 1, 0 } ++
         [_]u8{ 0, 0, 0, 0, 70, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0 } ++
         std.mem.asBytes(&@as(u16, @intCast(signs.max_body + 1))).* ++
-        [_]u8{0} ** 8),
+        @as([8]u8, @splat(0))),
     // count=1, len within max but stream truncated mid-body
     &([_]u8{ 'Z', 'S', 'G', '1', 1, 0 } ++
         [_]u8{ 0, 0, 0, 0, 70, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 8, 0, 1, 2, 3 }),
@@ -1455,29 +1455,29 @@ const zvn_corpus = [_][]const u8{
     // stock/owner/password/allowed, rentable
     &([_]u8{ 'Z', 'V', 'N', 'M', 1, 0 } ++
         [_]u8{ 0, 0, 0, 0, 70, 0, 0, 0, 0, 0, 0, 0, 42, 0, 0, 0, 4, 0, 0, 0, 100, 0, 0, 0, 0, 0 } ++
-        [_]u8{0} ** 82 ++ // owner: platform_len 0 + 16 + id_len 0 + 64
-        [_]u8{0} ** 65 ++ // password_len 0 + 64 hash
+        @as([82]u8, @splat(0)) ++ // owner: platform_len 0 + 16 + id_len 0 + 64
+        @as([65]u8, @splat(0)) ++ // password_len 0 + 64 hash
         [_]u8{0} ++ // allowed_n 0
         [_]u8{ 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0 }), // rental 0, rentable, auto_buy
     // owner platform_len 200 (> 16): must fail closed, not pass a bad slice
     &([_]u8{ 'Z', 'V', 'N', 'M', 1, 0 } ++
         [_]u8{ 0, 0, 0, 0, 70, 0, 0, 0, 0, 0, 0, 0, 42, 0, 0, 0, 4, 0, 0, 0, 100, 0, 0, 0, 0, 0 } ++
-        [_]u8{200} ++ [_]u8{0} ** 81 ++
-        [_]u8{0} ** 65 ++
+        [_]u8{200} ++ @as([81]u8, @splat(0)) ++
+        @as([65]u8, @splat(0)) ++
         [_]u8{0} ++
         [_]u8{ 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0 }),
     // owner id_len 100 (> 64): must fail closed too
     &([_]u8{ 'Z', 'V', 'N', 'M', 1, 0 } ++
         [_]u8{ 0, 0, 0, 0, 70, 0, 0, 0, 0, 0, 0, 0, 42, 0, 0, 0, 4, 0, 0, 0, 100, 0, 0, 0, 0, 0 } ++
-        [_]u8{0} ++ [_]u8{0} ** 16 ++ [_]u8{100} ++ [_]u8{0} ** 64 ++
-        [_]u8{0} ** 65 ++
+        [_]u8{0} ++ @as([16]u8, @splat(0)) ++ [_]u8{100} ++ @as([64]u8, @splat(0)) ++
+        @as([65]u8, @splat(0)) ++
         [_]u8{0} ++
         [_]u8{ 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0 }),
     // password_len 200 (> 64): must fail closed before the hash slice
     &([_]u8{ 'Z', 'V', 'N', 'M', 1, 0 } ++
         [_]u8{ 0, 0, 0, 0, 70, 0, 0, 0, 0, 0, 0, 0, 42, 0, 0, 0, 4, 0, 0, 0, 100, 0, 0, 0, 0, 0 } ++
-        [_]u8{0} ** 82 ++
-        [_]u8{200} ++ [_]u8{0} ** 64 ++
+        @as([82]u8, @splat(0)) ++
+        [_]u8{200} ++ @as([64]u8, @splat(0)) ++
         [_]u8{0} ++
         [_]u8{ 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0 }),
     // stock_n 255 claimed, stream truncated
@@ -1486,8 +1486,8 @@ const zvn_corpus = [_][]const u8{
     // allowed_n 9 (> 8) with one oversized entry, then record cut mid-password
     &([_]u8{ 'Z', 'V', 'N', 'M', 1, 0 } ++
         [_]u8{ 0, 0, 0, 0, 70, 0, 0, 0, 0, 0, 0, 0, 42, 0, 0, 0, 4, 0, 0, 0, 100, 0, 0, 0, 0, 0 } ++
-        [_]u8{0} ** 82 ++
-        [_]u8{0} ** 65 ++
+        @as([82]u8, @splat(0)) ++
+        @as([65]u8, @splat(0)) ++
         [_]u8{9} ++
         [_]u8{ 0, 0, 0, 0, 0, 0, 0, 0 }),
 };
@@ -1644,7 +1644,7 @@ const prefab_xml_corpus = [_][]const u8{
     "<decoration name=\"x\" position=\"1,2,3\"/>",
     "<decoration name=\"a\" position=\"1,2\"/>",
     "<decoration name=\"\" position=\"0,0,0\" rotation=\"99\"/>",
-    "<decoration name=\"" ++ ("n" ** 64) ++ "\" position=\"-1,-2,-3\"/>",
+    "<decoration name=\"" ++ @import("util/root.zig").repeat("n", 64) ++ "\" position=\"-1,-2,-3\"/>",
     // unclosed tag / missing quotes
     "<decoration name=\"x\" position=\"1,2,3\"",
     "decoration name=x position=1,2,3",
@@ -1663,7 +1663,7 @@ fn fuzzPrefabsXml(_: void, smith: *std.testing.Smith) !void {
     defer idx.deinit();
     try std.testing.expect(idx.items.len <= len);
     if (idx.items.len > 0) {
-        var heights: [256]u8 = .{64} ** 256;
+        var heights: [256]u8 = @splat(64);
         idx.applyToChunkHeights(0, 0, &heights);
     }
 }
@@ -1723,13 +1723,13 @@ const zch_corpus = [_][]const u8{
     // ZCH3 header pos(0,0), no planes, no heights (torn)
     &([_]u8{ 'Z', 'C', 'H', '3', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }),
     // ZCH3 heights-only for (0,0)
-    &([_]u8{ 'Z', 'C', 'H', '3', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 } ++ ([_]u8{64} ** 256)),
+    &([_]u8{ 'Z', 'C', 'H', '3', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 } ++ @as([256]u8, @splat(64))),
     // ZCH1 heights for (1,-1)
-    &([_]u8{ 'Z', 'C', 'H', '1', 1, 0, 0, 0, 0xff, 0xff, 0xff, 0xff } ++ ([_]u8{50} ** 256)),
+    &([_]u8{ 'Z', 'C', 'H', '1', 1, 0, 0, 0, 0xff, 0xff, 0xff, 0xff } ++ @as([256]u8, @splat(50))),
     // ZCH3 with blocks flag but truncated plane
-    &([_]u8{ 'Z', 'C', 'H', '3', 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0 } ++ ([_]u8{0} ** 256)),
+    &([_]u8{ 'Z', 'C', 'H', '3', 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0 } ++ @as([256]u8, @splat(0))),
     // bad flag bytes
-    &([_]u8{ 'Z', 'C', 'H', '3', 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0 } ++ ([_]u8{0} ** 256)),
+    &([_]u8{ 'Z', 'C', 'H', '3', 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0 } ++ @as([256]u8, @splat(0))),
     // wrong magic
     &([_]u8{ 'Z', 'C', 'H', '4', 0, 0, 0, 0, 0, 0, 0, 0 }),
 };
@@ -1885,7 +1885,7 @@ const gamestages_xml_corpus = [_][]const u8{
     // comments and control bytes
     "<!-- c --><gamestages>\x00<config daysAliveChangeWhenKilled=\"nan\"/>\x01</gamestages>",
     // very long group name (exceeds max_name_len, must be rejected not truncated silently)
-    "<group name=\"" ++ ("S_" ** 200) ++ "\" spawner=\"s\"/>",
+    "<group name=\"" ++ @import("util/root.zig").repeat("S_", 200) ++ "\" spawner=\"s\"/>",
 };
 const buff_corpus = [_][]const u8{
     "",
@@ -1939,7 +1939,7 @@ const loot_corpus = [_][]const u8{
     "<lootgroup name=\"g\" count=\"2,2\"><item group=\"g\"/></lootgroup>",
     // Zero size / zero counts / negative prob
     "<lootcontainer name=\"c\" size=\"0,0\"><item name=\"a\" count=\"0,0\" prob=\"-1\"/></lootcontainer>",
-    "<loot_settings poi_tier_mod=\"" ++ ("1.5," ** 12),
+    "<loot_settings poi_tier_mod=\"" ++ @import("util/root.zig").repeat("1.5,", 12),
     // Truncations and junk
     "<lootcontainer name=\"c\"><item name=\"x\" count=\"",
     "<lootgroup",
@@ -1982,8 +1982,8 @@ fn fuzzLootXml(_: void, smith: *std.testing.Smith) !void {
 const players_corpus = [_][]const u8{
     "",
     "ZPV2" ++ [_]u8{ 0, 0, 0, 0 },
-    "ZPV2" ++ [_]u8{ 1, 0, 0, 0, 1, 'a' } ++ ([_]u8{0} ** 18),
-    "ZPV3" ++ [_]u8{ 1, 0, 0, 0, 1, 'a' } ++ ([_]u8{0} ** 19),
+    "ZPV2" ++ [_]u8{ 1, 0, 0, 0, 1, 'a' } ++ @as([18]u8, @splat(0)),
+    "ZPV3" ++ [_]u8{ 1, 0, 0, 0, 1, 'a' } ++ @as([19]u8, @splat(0)),
     "ZPV3" ++ [_]u8{ 0xff, 0xff, 0xff, 0xff },
 };
 
@@ -2041,7 +2041,7 @@ fn fuzzWeatherTable() biome_layers.Table {
 
 // ZWTH1 | n=2 | states with matching biome ids 3 and 5 | rng | last_update | blood_moon
 fn weatherState(biome_id: u8) [weather.save_state_bytes]u8 {
-    var s = [_]u8{0} ** weather.save_state_bytes;
+    var s: [weather.save_state_bytes]u8 = @splat(0);
     s[0] = biome_id;
     return s;
 }
@@ -2057,18 +2057,18 @@ const weather_corpus = [_][]const u8{
     // n larger than max_biomes / table.weather_n
     "ZWTH1" ++ [_]u8{255},
     // n=1 but truncated mid-state
-    "ZWTH1" ++ [_]u8{1} ++ ([_]u8{0} ** 20),
+    "ZWTH1" ++ [_]u8{1} ++ @as([20]u8, @splat(0)),
     // n=1 matching table slot 0 (biome_id=3, group 0, storm_state 0) with tail
     "ZWTH1" ++ [_]u8{1} ++ weatherState(3) ++
         [_]u8{ 7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
     // storm_state out of range (byte 3 of first state)
-    "ZWTH1" ++ [_]u8{ 1, 3, 0, 0, 9 } ++ ([_]u8{0} ** (weather.save_state_bytes - 4)) ++
-        ([_]u8{0} ** 13),
+    "ZWTH1" ++ [_]u8{ 1, 3, 0, 0, 9 } ++ @as([weather.save_state_bytes - 4]u8, @splat(0)) ++
+        @as([13]u8, @splat(0)),
     // NaN in first weather param (offset 29 of the state)
-    "ZWTH1" ++ [_]u8{ 1, 3, 0, 0, 0, 0 } ++ ([_]u8{0} ** 24) ++
-        [_]u8{ 0, 0, 0xc0, 0x7f } ++ ([_]u8{0} ** 16) ++ ([_]u8{0} ** 13),
+    "ZWTH1" ++ [_]u8{ 1, 3, 0, 0, 0, 0 } ++ @as([24]u8, @splat(0)) ++
+        [_]u8{ 0, 0, 0xc0, 0x7f } ++ @as([16]u8, @splat(0)) ++ @as([13]u8, @splat(0)),
     // wrong biome_id for slot 0
-    "ZWTH1" ++ [_]u8{1} ++ weatherState(99) ++ ([_]u8{0} ** 13),
+    "ZWTH1" ++ [_]u8{1} ++ weatherState(99) ++ @as([13]u8, @splat(0)),
 };
 
 test "fuzz weather.zwt save decoder" {
@@ -2121,7 +2121,7 @@ const ally_corpus = [_][]const u8{
         [_]u8{ 5, 'S', 't', 'e', 'a', 'm' } ++ [_]u8{ 2, '3', '4' } ++
         [_]u8{0xff}),
     // over-long platform/id length prefixes (readLenStr bounds)
-    &([_]u8{ 'Z', 'A', 'L', '1', 1, 0 } ++ [_]u8{0xff} ++ [_]u8{'x'} ** 8),
+    &([_]u8{ 'Z', 'A', 'L', '1', 1, 0 } ++ [_]u8{0xff} ++ @as([8]u8, @splat('x'))),
 };
 
 test "fuzz allies.zal loader" {
@@ -2185,19 +2185,19 @@ const ztr_corpus = [_][]const u8{
     &([_]u8{ 'Z', 'T', 'R', '1', 1, 0xff, 0xff }),
     // one record, name "a", zero stock entries: the minimal well-formed shape
     &([_]u8{ 'Z', 'T', 'R', '1', 1, 1, 0 } ++
-        [_]u8{ 1, 'a' } ++ [_]u8{0} ** 16 ++ [_]u8{0}),
+        [_]u8{ 1, 'a' } ++ @as([16]u8, @splat(0)) ++ [_]u8{0}),
     // one record claiming a stock count past max_stock (must BadRecord, not
     // walk off the end)
     &([_]u8{ 'Z', 'T', 'R', '1', 1, 1, 0 } ++
-        [_]u8{ 1, 'a' } ++ [_]u8{0} ** 16 ++ [_]u8{0xff}),
+        [_]u8{ 1, 'a' } ++ @as([16]u8, @splat(0)) ++ [_]u8{0xff}),
     // two records where the first has one entry: the shape that desynced when
     // a skipped trader failed to consume its entries (fixed 2026-09-01).
     &([_]u8{ 'Z', 'T', 'R', '1', 1, 2, 0 } ++
-        [_]u8{ 1, 'a' } ++ [_]u8{0} ** 16 ++ [_]u8{1} ++
-        [_]u8{ 1, 'x' } ++ [_]u8{0} ** 8 ++
-        [_]u8{ 1, 'b' } ++ [_]u8{0} ** 16 ++ [_]u8{0}),
+        [_]u8{ 1, 'a' } ++ @as([16]u8, @splat(0)) ++ [_]u8{1} ++
+        [_]u8{ 1, 'x' } ++ @as([8]u8, @splat(0)) ++
+        [_]u8{ 1, 'b' } ++ @as([16]u8, @splat(0)) ++ [_]u8{0}),
     // record header claiming a 0xff-byte trader name with a short body
-    &([_]u8{ 'Z', 'T', 'R', '1', 1, 1, 0 } ++ [_]u8{0xff} ++ [_]u8{'n'} ** 8),
+    &([_]u8{ 'Z', 'T', 'R', '1', 1, 1, 0 } ++ [_]u8{0xff} ++ @as([8]u8, @splat('n'))),
 };
 
 test "fuzz traders.zst record walk" {
@@ -2235,15 +2235,15 @@ const sleeper_corpus = [_][]const u8{
     // claimed huge count with no records behind it
     &([_]u8{ 'Z', 'S', 'C', 'L', '1' } ++ [_]u8{ 0xff, 0xff, 0xff, 0xff }),
     // one record short by a byte (23 of the 24 a record needs)
-    &([_]u8{ 'Z', 'S', 'C', 'L', '1' } ++ [_]u8{ 1, 0, 0, 0 } ++ [_]u8{0} ** 23),
+    &([_]u8{ 'Z', 'S', 'C', 'L', '1' } ++ [_]u8{ 1, 0, 0, 0 } ++ @as([23]u8, @splat(0))),
     // one well-formed record of all-zero floats
-    &([_]u8{ 'Z', 'S', 'C', 'L', '1' } ++ [_]u8{ 1, 0, 0, 0 } ++ [_]u8{0} ** 24),
+    &([_]u8{ 'Z', 'S', 'C', 'L', '1' } ++ [_]u8{ 1, 0, 0, 0 } ++ @as([24]u8, @splat(0))),
     // one record of 0xff floats: NaN/huge extents through the AABB compare
-    &([_]u8{ 'Z', 'S', 'C', 'L', '1' } ++ [_]u8{ 1, 0, 0, 0 } ++ [_]u8{0xff} ** 24),
+    &([_]u8{ 'Z', 'S', 'C', 'L', '1' } ++ [_]u8{ 1, 0, 0, 0 } ++ @as([23]u8, @splat(0xff))),
     // triggered-store magic, same shapes
     &([_]u8{ 'Z', 'S', 'T', 'G', '1' } ++ [_]u8{ 0, 0, 0, 0 }),
     &([_]u8{ 'Z', 'S', 'T', 'G', '1' } ++ [_]u8{ 0xff, 0xff, 0xff, 0xff }),
-    &([_]u8{ 'Z', 'S', 'T', 'G', '1' } ++ [_]u8{ 1, 0, 0, 0 } ++ [_]u8{0xff} ** 24),
+    &([_]u8{ 'Z', 'S', 'T', 'G', '1' } ++ [_]u8{ 1, 0, 0, 0 } ++ @as([24]u8, @splat(0xff))),
 };
 
 test "fuzz sleepers cleared/triggered loaders" {
@@ -2322,8 +2322,8 @@ const spawning_xml_corpus = [_][]const u8{
     "<spawning><biome name=\"b\"><spawn entitygroup=\"g\" maxcount=\"999\" respawndelay=\"1,2,3,4,5,6,7\"/></biome></spawning>",
     "<spawning><entityspawner name=\"s\"><property name=\"EntityGroupName\" value=\"g\"/><property name=\"TotalPerWave\" value=\"255,999\"/></entityspawner></spawning>",
     // nested junk / comment / overlong attribute
-    "<!-- x --><spawning><biome name=\"" ++ ("A" ** 64) ++ "\"><spawn entitygroup=\"g\"/></biome></spawning>",
-    "<spawning><biome name=\"x\"><spawn entitygroup=\"y\" tags=\"" ++ ("t," ** 40) ++ "\"/></biome></spawning>",
+    "<!-- x --><spawning><biome name=\"" ++ @import("util/root.zig").repeat("A", 64) ++ "\"><spawn entitygroup=\"g\"/></biome></spawning>",
+    "<spawning><biome name=\"x\"><spawn entitygroup=\"y\" tags=\"" ++ @import("util/root.zig").repeat("t,", 40) ++ "\"/></biome></spawning>",
 };
 
 test "fuzz spawning.xml parser" {

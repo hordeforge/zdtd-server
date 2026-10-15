@@ -11,7 +11,7 @@ A party is a fixed eight-slot member list with a leader index and a voice lobby 
 ```zig
 pub const Party = struct {
     id: i32 = -1,
-    members: [max_party_members]i32 = .{-1} ** max_party_members,
+    members: [max_party_members]i32 = @splat(-1),
     n: u8 = 0,
     leader_index: u8 = 0,
     /// VoiceLobbyId (SetVoiceLobby). zdtd owns no voice lobby; kept for the

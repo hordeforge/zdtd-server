@@ -567,7 +567,7 @@ test "rotateRawY is identity for zero steps and preserves non-rotation bits" {
 }
 
 test "rotateRawY cube orientations form a bijection of order four" {
-    var seen = [_]bool{false} ** 24;
+    var seen: [24]bool = @splat(false);
     var rot: u8 = 0;
     while (rot < 24) : (rot += 1) {
         const raw = @as(u32, rot) << rotation_shift;

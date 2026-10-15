@@ -113,7 +113,15 @@ pub fn handleWorldInfo(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []con
             // ~40s; stock has the area meshed well before the player appears.
             if (self.wire_chunks) {
                 const r0: i32 = if (c.view_radius < 1) self.chunk_stream_radius_min else @min(c.view_radius, self.chunk_stream_radius_max);
-                try self.sendSpawnArea(peer, sp.x, sp.z, r0);
+                // Arm the paced drain only. sendSpawnArea's synchronous core
+                // ring (spawn + 8 neighbours) runs on this join tick, and three
+                // concurrent joins stack three cores before the shared drain
+                // budget sees a tick; that burst is what the p99 measurement
+                // (GAP join-burst row) attributes to join. The spawn-phase
+                // call (join.zig) still sends the core synchronously, so the
+                // client meshes its first chunks at the stock spawn step; this
+                // pre-arm only covers the DynamicClientArrive-first path.
+                try self.armSpawnArea(peer, sp.x, sp.z, r0);
             }
         }
         return true;

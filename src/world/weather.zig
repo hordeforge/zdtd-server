@@ -65,7 +65,7 @@ pub const Config = struct {
 };
 
 pub const Manager = struct {
-    states: [max_biomes]BiomeState = [_]BiomeState{.{}} ** max_biomes,
+    states: [max_biomes]BiomeState = @splat(.{}),
     n: u8 = 0,
     rand: rng.XorShift32 = .init(1),
     storm_frequency: f32 = 1,
@@ -395,7 +395,7 @@ pub const Manager = struct {
         const need = save_header_bytes + save_state_bytes * n;
         if (bytes.len < need) return false;
 
-        var out: [max_biomes]BiomeState = [_]BiomeState{.{}} ** max_biomes;
+        var out: [max_biomes]BiomeState = @splat(.{});
         var o: usize = save_magic_len + 1;
         var i: usize = 0;
         while (i < n) : (i += 1) {

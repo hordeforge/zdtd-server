@@ -64,13 +64,13 @@ pub const Passive = struct {
     tags: []const u8 = "",
     /// Per-level curve segments (stock `value="v1,v2,..."`: segment i applies
     /// at level i+1, clamped past the end). Filled for every parsed row.
-    curve: [max_curve_len]f32 = .{0} ** max_curve_len,
+    curve: [max_curve_len]f32 = @splat(0),
     curve_len: u8 = 0,
     /// Explicit curve anchors from `level="1,5"` or `duration="0,20"`
     /// (progression.xml's dominant form is level pairs; 18 tracked buff rows use
     /// durations): value[i] sits at anchors[i], piecewise-linear between
     /// (curveValueAtLevels). 0 anchors = implicit.
-    curve_levels: [max_curve_len]f32 = .{0} ** max_curve_len,
+    curve_levels: [max_curve_len]f32 = @splat(0),
     curve_levels_len: u8 = 0,
     /// `<requirement>` gates: the enclosing `<effect_group>`'s direct children
     /// plus this row's own (MinEffectGroup::ParseXml IL=103 and
@@ -302,9 +302,9 @@ fn appendGatedPassive(
     // `value="@name"` is a cvar reference (not a curve); `@:` is localization.
     const val_cvar = if (val_s.len > 1 and val_s[0] == '@' and val_s[1] != ':') val_s[1..] else "";
     const tags = xml.attr(body, tag, "tags") orelse "";
-    var curve: [max_curve_len]f32 = .{0} ** max_curve_len;
+    var curve: [max_curve_len]f32 = @splat(0);
     const curve_len = if (val_cvar.len > 0) 0 else parseCurveValue(val_s, &curve);
-    var curve_levels: [max_curve_len]f32 = .{0} ** max_curve_len;
+    var curve_levels: [max_curve_len]f32 = @splat(0);
     const curve_levels_len = parseAnchors(body, tag, &curve_levels);
     try passives.append(allocator, .{
         .name = try arena.dupe(u8, en),

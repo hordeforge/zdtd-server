@@ -70,8 +70,8 @@ pub const DrainResult = struct {
     /// what `known_entities` is keyed on. Saturating like the corpse sweep's
     /// report - past the cap the op still applies, so the cap is sized to the
     /// command buffer rather than guessed.
-    despawned_ids: [max_commands]i32 = .{0} ** max_commands,
-    despawned_slots: [max_commands]u32 = .{0} ** max_commands,
+    despawned_ids: [max_commands]i32 = @splat(0),
+    despawned_slots: [max_commands]u32 = @splat(0),
     despawned_n: u32 = 0,
 };
 
@@ -80,15 +80,15 @@ pub const Buffer = struct {
     /// Source attribution per op (0 = native/server; else 1-based wasm plugin
     /// slot). Temporal composability: a disabled plugin's pending ops are
     /// dropped by src before drain (paper).
-    srcs: [max_commands]i16 = .{0} ** max_commands,
+    srcs: [max_commands]i16 = @splat(0),
     n: usize = 0,
     /// Applied spawns attributed per source (paper 3.1 held inverse): the
     /// runtime records the spawned net id per plugin src so a withdrawn
     /// module's entities are despawned on removal, not left behind. Ring
     /// capped at max_commands; when full the oldest attribution is dropped
     /// (documented truncation: the most recent spawns stay revertible).
-    spawn_srcs: [max_commands]i16 = .{0} ** max_commands,
-    spawn_ids: [max_commands]i32 = .{0} ** max_commands,
+    spawn_srcs: [max_commands]i16 = @splat(0),
+    spawn_ids: [max_commands]i32 = @splat(0),
     spawn_n: usize = 0,
     /// Ring-truncation counter (not cleared on drain).
     spawn_evicted: u32 = 0,
@@ -98,7 +98,7 @@ pub const Buffer = struct {
     /// unchecked witness). Indexed by the 1-based plugin src; sized by
     /// `max_commands`, which is above `plugin.wasm.max_wasm_plugins` (the src
     /// ceiling), and a src outside it is ignored rather than aliased.
-    irrevocable_applied: [max_commands]u32 = .{0} ** max_commands,
+    irrevocable_applied: [max_commands]u32 = @splat(0),
     /// Lifetime drop counter (not cleared on drain).
     dropped: u32 = 0,
     /// Once: soft warning when n crosses warn_at.
@@ -458,7 +458,7 @@ test "the inverse classification is exhaustive and residue is counted per source
     w.say_fn = &SayCounter.say;
 
     const zid = w.spawnZombie(1, 70, 1, 40).?;
-    var text: [64]u8 = .{0} ** 64;
+    var text: [64]u8 = @splat(0);
     text[0] = 'h';
     text[1] = 'i';
     try std.testing.expect(w.commands.pushSrc(1, .{ .say = .{ .text = text, .len = 2 } }));
@@ -494,7 +494,7 @@ test "residue follows its source across plugin slot compaction" {
     w.say_ctx = &said;
     w.say_fn = &SayCounter.say;
 
-    var text: [64]u8 = .{0} ** 64;
+    var text: [64]u8 = @splat(0);
     text[0] = 'x';
     text[1] = 'y';
     try std.testing.expect(w.commands.pushSrc(3, .{ .say = .{ .text = text, .len = 2 } }));

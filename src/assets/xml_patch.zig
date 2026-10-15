@@ -47,7 +47,7 @@ pub const XPred = struct {
 
 pub const XSeg = struct {
     tag: []const u8 = "",
-    preds: [8]XPred = [_]XPred{.{}} ** 8,
+    preds: [8]XPred = @splat(.{}),
     pred_n: u8 = 0,
     /// Multiple predicates combine with AND unless the group is written as an
     /// `or` chain (`[@name='a' or @name='b']`; simple modlets use one or the
@@ -58,7 +58,7 @@ pub const XSeg = struct {
 };
 
 pub const ParsedXPath = struct {
-    segs: [16]XSeg = [_]XSeg{.{}} ** 16,
+    segs: [16]XSeg = @splat(.{}),
     n: usize = 0,
     /// Trailing attribute name when xpath ends with /@attr
     set_attr: ?[]const u8 = null,

@@ -16,6 +16,8 @@ pub const drainExplosions = world_explosion.drainExplosions;
 pub const blastBlock = world_explosion.blastBlock;
 const Client = game_mod.Client;
 const world_store = @import("../../world/store.zig");
+const containers_mod = @import("../../world/containers.zig");
+const assets_blocks = @import("../../assets/blocks.zig");
 const deco_mirror = @import("../../world/deco_mirror.zig");
 const block_ticker = @import("block_ticker.zig");
 const replicate_te = @import("replicate_te.zig");
@@ -60,7 +62,7 @@ pub fn claimAllowed(self: *Game, owner_entity: i32, x: i32, y: i32, z: i32) bool
 pub fn registerClaim(self: *Game, x: i32, y: i32, z: i32, owner_entity: i32) void {
     // Capture the stable owner key (login name) so the claim survives a
     // restart; entity ids are reassigned and cannot be persisted.
-    var owner_name: [32]u8 = .{0} ** 32;
+    var owner_name: [32]u8 = @splat(0);
     var owner_name_len: u8 = 0;
     for (&self.clients) |*c| {
         if (c.entity_id != owner_entity) continue;
@@ -135,39 +137,94 @@ pub fn removeClaimAt(self: *Game, x: i32, y: i32, z: i32) void {
 /// full HP, replicating each fix through the normal `SetBlock` path. Returns
 /// the number of blocks repaired.
 ///
-/// Two conscious simplifications, both stated in DIVERGENCES. Materials:
-/// stock's `repairBlock` (IL=135) consumes `RepairItems` from the TE storage
-/// in proportion to the damage fraction, and zdtd has no TE storage inventory,
-/// so the repair is free. Destroyed blocks: stock only heals damaged ones
-/// (the loop skips air via `get_isair`); a block already broken to air is not
-/// rebuilt, and neither is it here.
-pub fn repairClaimArea(self: *Game, cx: i32, cz: i32) u32 {
+/// Materials: stock's `repairBlock` (IL=135) charges `RepairItems` from the
+/// station's storage feature, `max(1, damage/MaxDamage * count * ResourceScale)`
+/// of each item, all-or-nothing (`TryRemoveItems` with the toolbelt flag off).
+/// A block with no list, or a station whose storage cannot pay, stays damaged
+/// (IL_0006-0008 and IL_004F-0052 return before the heal). Destroyed blocks:
+/// stock only heals damaged ones (the loop skips air via `get_isair`); a block
+/// already broken to air is not rebuilt, and neither is it here.
+pub fn repairClaimArea(self: *Game, cx: i32, cy: i32, cz: i32) u32 {
+    // The station's storage feature is the container at the keystone. Stock
+    // bails out of every block when that feature is missing (IL_0006-0008).
+    const station = self.containers.get(.{ .x = cx, .y = cy, .z = cz });
     const half: i32 = @intCast(self.land_claim_size / 2);
     var repaired: u32 = 0;
     var x: i32 = cx - half;
     while (x <= cx + half) : (x += 1) {
         var z: i32 = cz - half;
         while (z <= cz + half) : (z += 1) {
-            repaired += repairClaimColumn(self, x, z);
+            repaired += repairClaimColumn(self, x, z, station);
         }
     }
     return repaired;
+}
+
+/// Stock `repairBlock` cost for one item: `FastMax(1, damage/MaxDamage * count
+/// * ResourceScale)` (IL_006A-0091). Returns null when the block has no
+/// MaxDamage to scale against, which stock divides by unconditionally.
+fn repairCost(def: *const assets_blocks.BlockDef, damage: u16, count: u32, max_damage: u16) ?u32 {
+    if (max_damage == 0) return null;
+    const frac = @as(f32, @floatFromInt(damage)) / @as(f32, @floatFromInt(max_damage));
+    const raw = frac * @as(f32, @floatFromInt(count)) * def.resource_scale;
+    const n: i32 = @intFromFloat(raw);
+    return @intCast(@max(n, 1));
+}
+
+/// Take the whole repair list from the station storage, or nothing. Stock's
+/// `TryRemoveItems` (the toolbelt flag is false) checks every entry first and
+/// removes none when one is short.
+fn chargeRepair(self: *Game, store: *containers_mod.Container, def: *const assets_blocks.BlockDef, damage: u16) bool {
+    const max_damage = self.maxdamage.maxDamage(def.id) orelse return false;
+    var need: [assets_blocks.max_harvest_drops]struct { id: u16, n: u32 } = undefined;
+    const rows = def.repair_items;
+    if (rows.len > need.len) return false;
+    for (rows, 0..) |row, i| {
+        const item = self.items.byName(row.item_name) orelse return false;
+        need[i] = .{ .id = item.id, .n = repairCost(def, damage, row.count, max_damage) orelse return false };
+    }
+    for (need[0..rows.len]) |req| {
+        var have: u32 = 0;
+        for (store.slots[0..store.slot_count]) |s| {
+            if (s.item_id == req.id) have += s.count;
+        }
+        if (have < req.n) return false;
+    }
+    for (need[0..rows.len]) |req| {
+        var left = req.n;
+        for (store.slots[0..store.slot_count]) |*s| {
+            if (s.item_id != req.id or s.count == 0) continue;
+            const take: u32 = @min(left, s.count);
+            s.count -= @intCast(take);
+            if (s.count == 0) s.item_id = 0;
+            left -= take;
+            if (left == 0) break;
+        }
+    }
+    store.touched = true;
+    return true;
 }
 
 /// Repair one XZ column of the claim area: every damaged non-air block from
 /// bedrock to build height gets its damage cleared and a `SetBlock` with
 /// damage 0 fanned to nearby peers. Unloaded chunks are skipped (getOrCreate
 /// would materialize them); damage only lands on resident chunks anyway.
-fn repairClaimColumn(self: *Game, x: i32, z: i32) u32 {
+fn repairClaimColumn(self: *Game, x: i32, z: i32, station: ?*containers_mod.Container) u32 {
     const t = world_store.World.worldToChunk(x, z);
     const c = self.world.chunkAt(t.pos) orelse return 0;
     var repaired: u32 = 0;
     var y: i32 = 0;
     while (y < world_store.y_dim) : (y += 1) {
         if (c.dmgAt(t.lx, y, t.lz) == 0) continue;
-        if (c.blockAt(t.lx, y, t.lz) == 0) continue;
-        c.clearDmg(t.lx, y, t.lz);
         const id = c.blockAt(t.lx, y, t.lz);
+        if (id == 0) continue;
+        // No station storage, or a block with no repair list: stock returns
+        // before the heal, so the damage stays.
+        const def = self.blocks.byId(id) orelse continue;
+        if (def.repair_items.len == 0) continue;
+        const store = station orelse continue;
+        if (!chargeRepair(self, store, &def, c.dmgAt(t.lx, y, t.lz))) continue;
+        c.clearDmg(t.lx, y, t.lz);
         if (packages.buildSetBlockBodyDamage(&self.body_buf, x, y, z, id, 0, 0, 0)) |sb| {
             self.broadcastNear("NetPackageSetBlock", sb, @floatFromInt(x), @floatFromInt(z), self.interest_range) catch {};
         } else |_| {}

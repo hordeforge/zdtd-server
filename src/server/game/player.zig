@@ -1565,7 +1565,7 @@ pub fn barterSellScale(ctx: ?*anyopaque, slot: usize) f32 {
 /// Stacknumber is clamped to it. A null/empty spec leaves the kit unconfigured
 /// (`starter_kit_n == 0`), which selects the built-in default in spawnPlayer.
 pub fn parseStarterKit(self: *Game, spec: ?[]const u8) void {
-    self.sim.starter_kit = [_]ecs.world.StarterKitEntry{.{}} ** ecs.world.max_starter_kit;
+    self.sim.starter_kit = @as([ecs.world.max_starter_kit]ecs.world.StarterKitEntry, @splat(.{}));
     self.sim.starter_kit_n = 0;
     const text = spec orelse return;
     var it = std.mem.tokenizeAny(u8, text, ",;");

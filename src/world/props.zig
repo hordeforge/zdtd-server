@@ -32,7 +32,7 @@ pub fn chunkKey(chunk_x: i32, chunk_y: i32) u64 {
 }
 
 pub const Store = struct {
-    records: [max_prop_records]PropRecord = [_]PropRecord{.{ .chunk_key = 0, .prop_id = 0 }} ** max_prop_records,
+    records: [max_prop_records]PropRecord = @splat(.{ .chunk_key = 0, .prop_id = 0 }),
     n: usize = 0,
 
     pub fn indexOf(self: *const Store, chunk_x: i32, chunk_y: i32, prop_id: i32) ?usize {

@@ -25,7 +25,7 @@ Those directories are named `worlds/zdtd_sc_*`, and `worlds/` is gitignored. Sce
 
 `src/server/game/harness.zig` is the seam injection layer. Its header states the scope and the limit: in-process test and scenario helpers for joined clients, packet injection and direct world setup, and production networking does not use these shortcuts (`src/server/game/harness.zig:1-2`). `Game` re-exports the whole surface so a scenario holds one type, for example `attachJoinedClient` and `injectFramed` (`src/server/game.zig:3038-3047`). Replication is not a harness shortcut: a scenario calls the production `g.replicate()` directly.
 
-The joined-client entry point (`src/server/game/harness.zig:32-34`):
+The joined-client entry point (`src/server/game/harness.zig:31`):
 
 ```zig
 pub fn attachJoinedClient(self: *Game, capture: ?*@import("../../litenet/peer.zig").Capture) !*Client {
@@ -62,7 +62,7 @@ A capture peer deliberately does not behave like a real one on the reliable path
 
 ## Evidence
 
-`src/server/evidence.zig` is the one production piece here. It keeps a fixed ring of detector events with no secrets, no IP addresses and no packets, and an admin `evidence dump [path]` flushes it as JSONL through `Game.dumpEvidenceFile` (`src/server/evidence.zig:1-3`). The ring holds 64 events, newest overwriting oldest (`src/server/evidence.zig:7`, `src/server/evidence.zig:82-87`).
+`src/server/evidence.zig` is the one production piece here. It keeps a fixed ring of detector events with no secrets, no IP addresses and no packets, and an admin `evidence dump [path]` flushes it as JSONL through `Game.dumpEvidenceFile` (`src/server/evidence.zig:65`). The ring holds 64 events, newest overwriting oldest (`src/server/evidence.zig:7`, `src/server/evidence.zig:82-87`).
 
 The record and the ring (src/server/evidence.zig:65-80):
 
@@ -71,6 +71,9 @@ pub const Event = struct {
     tick: u64 = 0,
     peer_local: i32 = -1,
     entity_id: i32 = -1,
+    /// Net id of the entity whose action caused the finding (T22 attribution).
+    /// -1 = the reporter is the inducer, which is the common case.
+    inducer: i32 = -1,
     detector: Detector = .other,
     severity: Severity = .info,
     surface: Surface = .none,
@@ -79,10 +82,7 @@ pub const Event = struct {
 };
 
 pub const Ring = struct {
-    events: [max_ring]Event = [_]Event{.{}} ** max_ring,
-    head: usize = 0,
-    n: usize = 0,
-    total: u64 = 0,
+    events: [max_ring]Event = @splat(.{}),
 ```
 
 `Severity` runs info, soft, strong, hard (`src/server/evidence.zig:9-14`); `Detector` names the phase, ownership, bounds, movement, decode, throttle, flood and farming surfaces plus `other` (`src/server/evidence.zig:16-27`); `Surface` narrows a signal to a C2S surface so a quarantine can deny only that surface (`src/server/evidence.zig:58-63`). Each detector is classified by what decides it, and the ceiling below is what keeps a client-reported value from reaching the hard ladder (src/server/evidence.zig:46-52):

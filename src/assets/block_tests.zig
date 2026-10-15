@@ -422,6 +422,10 @@ fn fixtureId(_: ?*anyopaque, name: []const u8) ?u16 {
         .{ "fallBase", 206 },
         .{ "fallChild", 207 },
         .{ "oreNoExtend", 208 },
+        .{ "wallBase", 230 },
+        .{ "wallChild", 231 },
+        .{ "wallOwn", 232 },
+        .{ "wallBare", 233 },
         .{ "playerSignWood1x1", 209 },
         .{ "playerSignWood1x3", 210 },
         .{ "plainBlock", 211 },
@@ -634,6 +638,60 @@ test "Harvest drop rows parse with Extends inheritance" {
     // The base's own Fall row (terrDirt) was overridden, not duplicated.
     const fb = t.byName("fallBase").?;
     try std.testing.expectEqual(@as(usize, 1), t.dropsFor(fb.id, .fall).len);
+}
+
+test "RepairItems parses the class block and follows Extends" {
+    // BlocksFromXml IL_07BA-0836: GetClass("RepairItems") then one entry per
+    // child property, name = item, value = count. An own class replaces the
+    // parent's (the resolved property set wins); a block that declares none
+    // inherits the parent's list and its ResourceScale.
+    const src =
+        \\<blocks>
+        \\<block name="wallBase">
+        \\  <property name="ResourceScale" value="0.5"/>
+        \\  <property class="RepairItems">
+        \\    <property name="resourceCobblestones" value="6"/>
+        \\    <property name="resourceClayLump" value="2"/>
+        \\  </property>
+        \\</block>
+        \\<block name="wallChild">
+        \\  <property name="Extends" value="wallBase"/>
+        \\</block>
+        \\<block name="wallOwn">
+        \\  <property name="Extends" value="wallBase"/>
+        \\  <property class="RepairItems">
+        \\    <property name="resourceForgedIron" value="10"/>
+        \\  </property>
+        \\</block>
+        \\<block name="wallBare">
+        \\  <property name="Material" value="Mstone"/>
+        \\</block>
+        \\</blocks>
+    ;
+    const path = ".zdtd_test_blocks_repair.xml";
+    try io_fs.writeFile(path, src);
+    defer io_fs.deleteFile(path);
+    var t = try loadFromPath(std.testing.allocator, path, fixtureId, null);
+    defer t.deinit();
+
+    const base = t.byName("wallBase").?;
+    try std.testing.expectEqual(@as(usize, 2), base.repair_items.len);
+    try std.testing.expectEqualStrings("resourceCobblestones", base.repair_items[0].item_name);
+    try std.testing.expectEqual(@as(u32, 6), base.repair_items[0].count);
+    try std.testing.expectEqual(@as(u32, 2), base.repair_items[1].count);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.5), base.resource_scale, 1e-4);
+
+    const child = t.byName("wallChild").?;
+    try std.testing.expectEqual(@as(usize, 2), child.repair_items.len);
+    try std.testing.expectEqualStrings("resourceClayLump", child.repair_items[1].item_name);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.5), child.resource_scale, 1e-4);
+
+    const own = t.byName("wallOwn").?;
+    try std.testing.expectEqual(@as(usize, 1), own.repair_items.len);
+    try std.testing.expectEqualStrings("resourceForgedIron", own.repair_items[0].item_name);
+    try std.testing.expectEqual(@as(u32, 10), own.repair_items[0].count);
+
+    try std.testing.expectEqual(@as(usize, 0), t.byName("wallBare").?.repair_items.len);
 }
 
 test "Collide parses the blocking bits and follows Extends" {

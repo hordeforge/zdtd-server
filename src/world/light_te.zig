@@ -95,8 +95,8 @@ pub fn parsePayload(payload: []const u8, out: *Light) bool {
 }
 
 pub const Store = struct {
-    items: [max_lights]Light = [_]Light{.{}} ** max_lights,
-    used: [max_lights]bool = [_]bool{false} ** max_lights,
+    items: [max_lights]Light = @splat(.{}),
+    used: [max_lights]bool = @splat(false),
     n: u32 = 0,
 
     pub fn get(self: *const Store, pos: PosKey) ?*const Light {

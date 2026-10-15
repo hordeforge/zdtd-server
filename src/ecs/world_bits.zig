@@ -8,7 +8,7 @@ const max_entities = @import("world.zig").max_entities;
 pub const AtomicBits = struct {
     const words_n = (max_entities + 63) / 64;
 
-    words: [words_n]std.atomic.Value(u64) = [_]std.atomic.Value(u64){.{ .raw = 0 }} ** words_n,
+    words: [words_n]std.atomic.Value(u64) = @splat(.{ .raw = 0 }),
 
     pub fn initEmpty() AtomicBits {
         return .{};

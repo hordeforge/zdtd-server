@@ -6,12 +6,12 @@ Sources: [`src/ecs/poi_lock.zig`](../../src/ecs/poi_lock.zig), [`src/ecs/compone
 
 ## Ownership and boundary
 
-The lockout lives in the sim because every quest path already runs there: accepting a quest stores a POI rectangle on the quest slot, an `UnlockPOI` quest action releases the holder, and a quest that ends releases it again (`src/ecs/quest_trade.zig:543`, `:549`, `:267`). The table is a fixed ECS array of 64 entries, each holding a rectangle, up to eight quester entity ids, the locked flag, the lockout deadline and the grace applied when the last quester leaves (`src/ecs/poi_lock.zig:23`, `:28`):
+The lockout lives in the sim because every quest path already runs there: accepting a quest stores a POI rectangle on the quest slot, an `UnlockPOI` quest action releases the holder, and a quest that ends releases it again (`src/ecs/quest_trade.zig:543`, `:549`, `:267`). The table is a fixed ECS array of 64 entries, each holding a rectangle, up to eight quester entity ids, the locked flag, the lockout deadline and the grace applied when the last quester leaves (`src/ecs/poi_lock.zig:28`, `:28`):
 
 ```zig
 pub const Lock = struct {
     rect: c.PoiRect = .{},
-    questers: [max_questers]i32 = [_]i32{0} ** max_questers,
+    questers: [max_questers]i32 = @splat(0),
     quester_n: u8 = 0,
     /// QuestLockInstance.IsLocked.
     locked: bool = false,
@@ -70,7 +70,7 @@ The handler is a trust boundary: the packet's entity id must be the sender's own
 
 ## Land claims and the sleeping bag
 
-A claim row is one keystone position, its live owner entity, the offline accounting fields and a stable owner key for persistence (`src/server/game/types.zig:188`):
+A claim row is one keystone position, its live owner entity, the offline accounting fields and a stable owner key for persistence (`src/server/game/types.zig:225`):
 
 ```zig
 pub const LandClaim = struct {
@@ -83,7 +83,7 @@ pub const LandClaim = struct {
     owner_seen_day: u32 = 0,
     /// Stable owner key for persistence: the login name (entity ids are
     /// reassigned across restarts). Empty when the claim predates the field.
-    owner_name: [32]u8 = .{0} ** 32,
+    owner_name: [32]u8 = @splat(0),
     owner_name_len: u8 = 0,
 ```
 

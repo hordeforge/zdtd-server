@@ -101,6 +101,14 @@ pub const Reader = struct {
         if (self.pos + len > self.data.len) return error.EndOfStream;
         self.pos += len;
     }
+
+    /// Skip a fixed-count byte field (a Guid, a hash, a raw blob) without
+    /// copying it. Bounded by the payload the caller already validated, so a
+    /// short body fails the same way a read would.
+    pub fn skipBytes(self: *Reader, n: usize) ReadError!void {
+        if (self.remaining() < n) return error.EndOfStream;
+        self.pos += n;
+    }
 };
 
 pub const Writer = struct {

@@ -21,7 +21,7 @@ pub const StockChat = struct {
     msg_sender: u8 = 0,
     bb_mode: u8 = 0,
     /// Party/friends/whisper recipients (≤ 8, the party cap).
-    recipients: [8]i32 = .{-1} ** 8,
+    recipients: [8]i32 = @splat(-1),
     recipient_count: u8 = 0,
 };
 
@@ -87,7 +87,7 @@ pub fn parseStockChat(body: []const u8) !StockChat {
 /// is kept on the struct for API symmetry but must not be encoded/decoded.
 pub const SoundAtPosition = struct {
     pos: [3]f32,
-    clip: [max_audio_clip_len]u8 = .{0} ** max_audio_clip_len,
+    clip: [max_audio_clip_len]u8 = @splat(0),
     clip_len: u8 = 0,
     mode: u8 = 0,
     distance: i32 = 0,
@@ -212,7 +212,7 @@ test "a clip name at the cap fails closed instead of trapping the cast" {
     try w.writeF32(1);
     try w.writeF32(2);
     try w.writeF32(3);
-    const long = [_]u8{'a'} ** max_audio_clip_len;
+    const long: [max_audio_clip_len]u8 = @splat('a');
     try w.writeString(&long);
     try w.writeByte(1);
     try w.writeI32(30);

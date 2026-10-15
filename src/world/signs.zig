@@ -43,8 +43,8 @@ pub const SignStore = struct {
     items: [max_signs]Sign = undefined,
     /// Lookup mirror of `items[i].pos` (only valid where `used[i]`); the AoS
     /// copy stays authoritative for save/encode.
-    keys: [max_signs]PosKey = .{PosKey{ .x = 0, .y = 0, .z = 0 }} ** max_signs,
-    used: [max_signs]bool = .{false} ** max_signs,
+    keys: [max_signs]PosKey = @splat(PosKey{ .x = 0, .y = 0, .z = 0 }),
+    used: [max_signs]bool = @splat(false),
     n: usize = 0,
     cap_warned: bool = false,
 

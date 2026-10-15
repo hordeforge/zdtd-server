@@ -2659,11 +2659,16 @@ note was the pre-fix audit. Still open: the screamer summon loop.
   the 80 m area (GetPOIsAtXZ) - that area structure is the chunk-area
   ledger waiver.
 
-- **Chunk-area spawn ledger** `PARTIAL (waived)`
-  Stock keeps per-chunk-area counts. zdtd keeps one count and one respawn time
-  per spawning.xml rule (`Director.rule_budgets`, `aidirector.zig`
-  `RuleBudgetState`). **2026-10-05**: the "one global alive" note and the
-  blood-moon-clock anchor were stale. Residual: counts are not split per chunk area.
+- **Chunk-area spawn ledger** `WORKS` (was `PARTIAL (waived)`; closed
+  2026-10-12)
+  The budget is per spawning.xml rule and per 5x5-chunk district
+  (`districtKey`, `toChunkXZ / 5`, an 80-block cell, spawning.md §3). Each
+  district keeps its own alive count, respawn delay and kill-thinned cap
+  (`DistrictBudget`), and a release keys the district stamped at spawn, not
+  where the body dies. A rule that fills more than 8 districts falls back to
+  one shared counter (`max_budget_districts`).
+  *Anchors:* `src/ecs/aidirector.zig` (`districtKey`, `budgetAllows`,
+  `releaseRule`), `src/ecs/aidirector_tests.zig`
 
 - **entitygroups.xml weighted group table** `WORKS` `(2026-08-22 re-audit)`
   The 512-group cap is gone: the table is now a flat arena slice and the parse
@@ -2996,11 +3001,15 @@ note was the pre-fix audit. Still open: the screamer summon loop.
   exists only because the package also appears in the entity/AI catalog.
   *Anchors:* `src/wire/stock_horde.zig:27`
 
-- **AIDirector / sleeper state persistence across restart** `PARTIAL (waived)`
-  `saveAll` covers chunks/containers/block-meta/players; entity/director/sleeper
-  timers are runtime state that stock also rebuilds on load. Persisting live mobs
-  needs `EntityCreationData` snapshot RE - waived as session-lifetime polish.
-  *Anchors:* `src/server/game.zig`
+- **AIDirector / sleeper state persistence across restart** `WORKS` (was
+  `PARTIAL (waived)`; closed 2026-10-12 after the save was found already wired)
+  A woken volume writes its rect and re-arm time to `sleepers_triggered.zst`
+  (`sleepers.zig` `saveTriggered`), and a restart reloads both, so a cleared
+  POI stays cleared until its respawn time. Quest-cleared volumes ride ZSCL1.
+  Live mobs are session state: stock rebuilds them from the volume on load,
+  and zdtd does the same.
+  *Anchors:* `src/world/sleepers.zig` (`saveTriggered`, `respawn_time`),
+  `src/server/game/sleeper.zig` (`rearmIfExpired`)
 
 - **Entity spawn replication (EntityCreationData v36)** `WORKS`
   Correct zombie/animal empty middle branch, sleeper flag and stressAmount tail.
@@ -3059,20 +3068,17 @@ note was the pre-fix audit. Still open: the screamer summon loop.
   *Anchors:* `src/server/game.zig` (`replicatePlayerHealth`),
   `asm.il:199650` (SendStatChangePacket), `asm.il:200440`
 
-- **Animation / ragdoll / look-at replication for AI** `PARTIAL (waived)`
-  Server drives AI position/state; the landed-strike attack params now ship:
-  a zombie hit sets an edge that replicate drains into one stock
-  `NetPackageEntityAnimationData` (Attack int / AttackBlend float /
-  AttackTrigger, hashes from the RE-pinned CRC-32 `animatorStringHash`,
-  entity-ai.md 2026-09-22), so a stock client's avatar controller plays the
-  swing; gated by the melee-replication scenario (zombie entity id, count 3,
-  pinned Attack hash, edge consumed). zdtd picks stock's base variant and a
-  fixed blend midpoint instead of the limb-derived random picks (cosmetic
-  client choices; a dedi zombie carries no per-limb body damage); the other
-  animator params (locomotion), look-at and server-initiated ragdoll FX stay
-  client-predicted, out of scope (AGENTS: wire is contract, no fake FX - §2a).
-  *Anchors:* `src/server/game/replicate.zig` (strike flush), `src/wire/stock_anim.zig`
-  (builder + hashes), `src/ecs/ai_tasks.zig` (strike edge)
+- **Animation / ragdoll / look-at replication for AI** `WORKS` (was
+  `PARTIAL (waived)`; closed 2026-10-12)
+  A landed strike flushes one `NetPackageEntityAnimationData` (Attack int,
+  AttackBlend, AttackTrigger; hashes from the RE-pinned CRC-32
+  `animatorStringHash`), and a ragdoll relays `NetPackageEntityRagdoll` to
+  every peer except the owner (`game_tests.zig` "entity ragdoll relays").
+  The swing uses stock's base variant and a fixed blend midpoint: a dedi
+  zombie carries no per-limb body damage, so the limb-derived picks have no
+  input. Locomotion and look-at stay client-predicted, as stock runs them.
+  *Anchors:* `src/server/game/replicate.zig` (strike flush),
+  `src/wire/stock_anim.zig`, `src/ecs/ai_tasks.zig` (strike edge)
 
 - **Spawn placement validity** `WORKS`
   Spawn Y is now ground-snapped through the world ground hook for every
@@ -3080,10 +3086,11 @@ note was the pre-fix audit. Still open: the screamer summon loop.
   wandering horde): the player's transform Y is its centre (~1.7 m up), so
   spawning at it embedded zombies in hillsides or left them floating on
   slopes. The per-spawn bearing jitter (seeded from the spawn counter) already
-  broke the fixed-bearing repetition. Residuals: the stock 4 x 2.5 x 4
-  standable/empty box test and the out-of-view constraint are not modelled -
-  spawns can still overlap an entity or appear on-screen, a polish gap rather
-  than a stuck-zombie one.
+  broke the fixed-bearing repetition. The anti-stacking box is now applied: a
+  spawn aborts when any entity stands inside the 4 x 2.5 x 4 box around the
+  chosen position (`spawnBoxOccupied`, spawning.md IL_03f8), for both zombies
+  and animals. Residual: the out-of-view constraint, so a spawn can still
+  appear on screen.
   *Anchors:* `src/ecs/aidirector.zig:564,473,683,790` (`groundY` snaps),
   `src/ecs/world.zig:681-685` (`groundY`), `asm.il:1094396-1094440`
 
@@ -3175,11 +3182,14 @@ consumption has no pinned C2S shape.
   bool plus i64.
   *Anchors:* `src/wire/stock_inv.zig:73-100`, `:497-571`
 
-- **Item modifiers (mods) and cosmetics** `PARTIAL (waived)`
-  Mods/cosmetics wire is valid (length 0) and survives round-trip; stock mod
-  effects are client FX. Faking `item_modifiers.xml` without RE would be worse
-  than exposing unmodded base items.
-  *Anchors:* `src/wire/stock_inv.zig:93-95`, `:535-548`
+- **Item modifiers (mods) and cosmetics** `WORKS` (was `PARTIAL (waived)`;
+  closed 2026-10-12 after the fold was found already wired)
+  An installed mod's `item_modifiers.xml` passives fold into the wearer's
+  tracked deltas (`modTrackedDeltas` in `src/server/game/tick.zig:250`, called
+  for the held item and every worn slot), which is stock
+  `ItemValue.ModifyValue` step 5. Cosmetic mods are the client mesh swap and
+  carry no server effect.
+  *Anchors:* `src/server/game/tick.zig:250`, `src/wire/stock_inv.zig:93-95`
 
 - **Item durability (ItemValue.UseTimes)** `WORKS` (2026-08-21)
   `InvSlot.use_times` carries the stock `ItemValue.UseTimes` (f32) and both
@@ -4759,10 +4769,14 @@ a finer server encoding.
   The deeper fix stays W2b: async chunk gen (proc gen and te_scan off the join
   tick). **2026-10-06: te_scan is already optimized** ("skipped for clean
   proc chunks", the 19.7 M -> 262 K reduction), and `sendSpawnArea` is
-  already paced (core rings synchronous, outer rings budgeted). What
-  remains is proc gen off the tick: `getOrCreate` generating a chunk on the
-  join path is the synchronous work the four sections attribute to
-  `join_spawn`. **Scope check:** the outer rings are already budgeted and
+  already paced (core rings synchronous, outer rings budgeted). **2026-10-14:
+  the worldinfo path no longer sends the synchronous core.** The
+  DynamicClientArrive-first arm (`c2s/join_worldinfo.zig:124`) now calls
+  `armSpawnArea`, which walks the whole 9-chunk core through the paced drain
+  instead of sending it on the join tick; the spawn-phase call
+  (`game/join.zig:289`) still sends the core synchronously, so a
+  stock-order client meshes its first chunks at the same step as before.
+  **Scope check:** the outer rings are already budgeted and
   the synchronous core (9 chunks) is necessary for the client to mesh before
   `World.IsPositionAvailable`, so W2b has little left to move. The PARTIAL
   is a measurement gap - the 402 ms p99 on a real map - rather than a
@@ -5397,7 +5411,8 @@ pre-fix audit. Still open: no Steam or EOS server-browser registration.
   runs `ItemClass.OnHoldingItemActivated`, type 1 `OnHoldingReset`, both
   client-side item hooks with no server state. Only `Debug` (no ProcessPackage
   server branch at all) is the developer surface the old label described.
-  `Debug` remains unhandled. `SimpleRPC`, `ModifyCVar` and `SetProp` do not: the SimpleRPC handler owner-gates the sender and relays to tracked peers (`c2s/quest_buff.zig`, stock IL=17).
+  `Debug` is answered by dispatch's stock no-op arm (counts `c2s_noop`, same
+  as `DynamicMesh`), so neither inflates `c2s_unhandled`. `SimpleRPC`, `ModifyCVar` and `SetProp` do not: the SimpleRPC handler owner-gates the sender and relays to tracked peers (`c2s/quest_buff.zig`, stock IL=17).
   EAC/encryption waivers (`EAC`,
   `EncryptionPublicKey`, `KeyExchangeComplete`), creative/editor
   (`EditorUpdateVolume`), Twitch integration

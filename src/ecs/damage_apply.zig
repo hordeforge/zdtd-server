@@ -211,11 +211,11 @@ test "class PhysicalDamageResist halves server-computed damage" {
     // instead, because neither of these two paths goes through it.
     var w: World = .{};
     defer w.deinit();
-    var zk: [max_entities]u16 = .{std.math.maxInt(Slot)} ** max_entities;
+    var zk: [max_entities]u16 = @splat(std.math.maxInt(Slot));
     const z = w.spawnZombie(0, 70, 0, 200).?;
     const zs = w.slotOfNetId(z).?;
     w.class_id[zs].phys_resist = 50;
-    var dmg_fp: [max_entities]u32 = .{0} ** max_entities;
+    var dmg_fp: [max_entities]u32 = @splat(0);
     dmg_fp[zs] = 1000; // 10.0 hp -> 5.0 after 50%
     try std.testing.expectEqual(@as(u32, 1), applyDeferredDamage(&w, dmg_fp[0..], zk[0..]));
     try std.testing.expectEqual(@as(f32, 195.0), w.health[zs].hp);
@@ -248,8 +248,8 @@ test "deferred damage that kills a player leaves a dirty corpse at hp 0" {
     const ps = w.slotOfNetId(p).?;
     w.health[ps].hp = 1;
     w.dirty[ps] = .{};
-    var dmg_fp: [max_entities]u32 = .{0} ** max_entities;
-    var zk: [max_entities]u16 = .{std.math.maxInt(Slot)} ** max_entities;
+    var dmg_fp: [max_entities]u32 = @splat(0);
+    var zk: [max_entities]u16 = @splat(std.math.maxInt(Slot));
     dmg_fp[ps] = 500; // 5.0 hp
     try std.testing.expectEqual(@as(u32, 1), applyDeferredDamage(&w, dmg_fp[0..], zk[0..]));
     try std.testing.expectEqual(@as(f32, 0), w.health[ps].hp);
@@ -280,8 +280,8 @@ test "the deferred kill funnels match World.applyDamage: blood-moon flag and cor
     w.director.clock.bloodmoon_frequency = 7;
     w.health[ps].hp = 1;
     w.health[zs].hp = 1;
-    var dmg_fp: [max_entities]u32 = .{0} ** max_entities;
-    var zk: [max_entities]u16 = .{std.math.maxInt(Slot)} ** max_entities;
+    var dmg_fp: [max_entities]u32 = @splat(0);
+    var zk: [max_entities]u16 = @splat(std.math.maxInt(Slot));
     dmg_fp[ps] = 100_000;
     dmg_fp[zs] = 100_000;
     try std.testing.expectEqual(@as(u32, 2), applyDeferredDamage(&w, dmg_fp[0..], zk[0..]));
@@ -318,8 +318,8 @@ test "GameDifficulty damage scale: AI->player x IncomingDamage at the deferred c
     const p = w.spawnPlayer(0, 70, 0, 0).?;
     const ps = w.slotOfNetId(p).?;
     w.health[ps].hp = 100;
-    var dmg_fp: [max_entities]u32 = .{0} ** max_entities;
-    var zk: [max_entities]u16 = .{std.math.maxInt(Slot)} ** max_entities;
+    var dmg_fp: [max_entities]u32 = @splat(0);
+    var zk: [max_entities]u16 = @splat(std.math.maxInt(Slot));
     dmg_fp[ps] = 800; // 8.0 hp
     try std.testing.expectEqual(@as(u32, 1), applyDeferredDamage(&w, dmg_fp[0..], zk[0..]));
     try std.testing.expectEqual(@as(f32, 94.0), w.health[ps].hp);
@@ -332,7 +332,7 @@ test "GameDifficulty damage scale: AI->player x IncomingDamage at the deferred c
     const z = w.spawnZombie(1, 70, 0, 40).?;
     const zs = w.slotOfNetId(z).?;
     w.health[zs].hp = 100;
-    var zfp: [max_entities]u32 = .{0} ** max_entities;
+    var zfp: [max_entities]u32 = @splat(0);
     zfp[zs] = 800;
     try std.testing.expectEqual(@as(u32, 1), applyDeferredDamage(&w, zfp[0..], zk[0..]));
     try std.testing.expectEqual(@as(f32, 92.0), w.health[zs].hp); // 8.0 flat
@@ -348,10 +348,10 @@ test "deferred AI damage passes GeneralDamageResist and the armor leg" {
     const p = w.spawnPlayer(0, 70, 0, 0).?;
     const ps = w.slotOfNetId(p).?;
     w.health[ps].hp = 100;
-    var fp: [max_entities]u32 = .{0} ** max_entities;
+    var fp: [max_entities]u32 = @splat(0);
     fp[ps] = 800; // 8.0 hp
     // Bare: no armor, no VM fold -> 8.0 x Adventurer 0.75 = 6.0.
-    var zk: [max_entities]u16 = .{std.math.maxInt(Slot)} ** max_entities;
+    var zk: [max_entities]u16 = @splat(std.math.maxInt(Slot));
     try std.testing.expectEqual(@as(u32, 1), applyDeferredDamage(&w, fp[0..], zk[0..]));
     try std.testing.expectEqual(@as(f32, 94.0), w.health[ps].hp);
     // GeneralDamageResist .25 (perkPainTolerance 5): 6.0 x 0.75 = 4.5.

@@ -41,7 +41,7 @@ pub fn buildWeatherBody(buf: []u8, biomes: []const WeatherBiome) ![]u8 {
 
 test "weather body five biomes is 115" {
     var buf: [256]u8 = undefined;
-    var biomes: [5]WeatherBiome = [_]WeatherBiome{.{}} ** 5;
+    var biomes: [5]WeatherBiome = @splat(.{});
     var i: usize = 0;
     while (i < 5) : (i += 1) {
         biomes[i].biome_id = @intCast(i + 1);

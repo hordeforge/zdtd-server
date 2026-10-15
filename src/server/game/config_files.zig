@@ -63,7 +63,7 @@ const Blob = struct {
 /// rebuilding) another instance's data (paper: shared mutable state belongs
 /// to the context that owns the inputs). Game teardown frees it.
 pub const Cache = struct {
-    rows: [s2c_names.len]Blob = [_]Blob{.{}} ** s2c_names.len,
+    rows: [s2c_names.len]Blob = @splat(.{}),
     built: bool = false,
 };
 

@@ -138,10 +138,10 @@ pub const WaypointInvite = struct {
     pos: [3]i32,
     /// Fixed-size copies of the client strings; parse never returns slices
     /// into the body or into stack scratch.
-    icon: [max_waypoint_str]u8 = .{0} ** max_waypoint_str,
+    icon: [max_waypoint_str]u8 = @splat(0),
     icon_len: u8 = 0,
     name_present: bool = false,
-    name_text: [max_waypoint_str]u8 = .{0} ** max_waypoint_str,
+    name_text: [max_waypoint_str]u8 = @splat(0),
     name_text_len: u8 = 0,
     name_author: platform_user.Stored = .{},
     b_tracked: bool = false,
@@ -353,7 +353,7 @@ test "a waypoint icon at the cap fails closed instead of trapping the cast" {
     try w.writeI32(1);
     try w.writeI32(2);
     try w.writeI32(3);
-    const long = [_]u8{'i'} ** max_waypoint_str;
+    const long: [max_waypoint_str]u8 = @splat('i');
     try w.writeString(&long);
     try w.writeBool(false); // no name
     try std.testing.expectError(error.Overflow, parseWaypointInvite(w.written()));

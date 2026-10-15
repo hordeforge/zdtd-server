@@ -68,6 +68,9 @@ pub const CounterId = enum(u16) {
     block_tick_drops,
     /// Named C2S package with no handler arm (falls off handlePackage).
     c2s_unhandled,
+    /// Named C2S package stock itself ignores: a documented no-op arm
+    /// swallows it on purpose instead of counting it unhandled.
+    c2s_noop,
     /// Peer reconnects after prior join (churn signal).
     reconnects,
     /// Evidence JSONL lines written (observe).
@@ -160,7 +163,7 @@ pub const CounterId = enum(u16) {
 pub const counters_len: usize = @typeInfo(CounterId).@"enum".fields.len;
 
 pub const Counters = struct {
-    values: [counters_len]u64 = .{0} ** counters_len,
+    values: [counters_len]u64 = @splat(0),
 
     pub fn add(self: *Counters, id: CounterId, n: u64) void {
         const i: usize = @intFromEnum(id);
@@ -184,7 +187,7 @@ pub const Counters = struct {
 /// Fixed log2 histogram for latency in nanoseconds (power-of-two buckets).
 /// Bucket k covers [2^k, 2^(k+1)) ns for k in 0..63.
 pub const LatencyHist = struct {
-    buckets: [64]u64 = .{0} ** 64,
+    buckets: [64]u64 = @splat(0),
     count: u64 = 0,
     sum_ns: u64 = 0,
     max_ns: u64 = 0,

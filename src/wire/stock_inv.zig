@@ -69,16 +69,16 @@ pub const StockSlot = struct {
     meta_charge: f32 = 0,
     ammo_index: u8 = 0,
     /// Attached mod item ids (stock ItemValue.Modifications; 4 slots).
-    mods: [4]u16 = .{0} ** 4,
+    mods: [4]u16 = @splat(0),
     mod_n: u8 = 0,
     /// Per-mod Quality parallel to `mods` (nested ItemValue.Quality).
-    mod_qualities: [4]u8 = .{0} ** 4,
+    mod_qualities: [4]u8 = @splat(0),
     /// ItemValue stats (stock `ItemValue/Stat`): the per-item passive-effect
     /// deltas a client-created item carries. Stock writes them as
     /// `type u8 | slotA i16 | slotB i16` and its `Stat` ctor makes
     /// `isBoosted = slotB > 0`, so keeping the wire pair verbatim
     /// round-trips the entry exactly.
-    stats: [max_item_stats]StatEntry = .{StatEntry{}} ** max_item_stats,
+    stats: [max_item_stats]StatEntry = @splat(StatEntry{}),
     stats_n: u8 = 0,
 };
 
@@ -295,9 +295,9 @@ pub fn buildFromEcsResolved(
     resolve: ?TypeResolver,
     ctx: ?*anyopaque,
 ) ![]u8 {
-    var tb: [toolbelt_slots]StockSlot = [_]StockSlot{.{}} ** toolbelt_slots;
-    var bag: [bag_slots]StockSlot = [_]StockSlot{.{}} ** bag_slots;
-    var eq: [equipment_slots]StockSlot = [_]StockSlot{.{}} ** equipment_slots;
+    var tb: [toolbelt_slots]StockSlot = @splat(.{});
+    var bag: [bag_slots]StockSlot = @splat(.{});
+    var eq: [equipment_slots]StockSlot = @splat(.{});
 
     var i: usize = 0;
     while (i < toolbelt_slots) : (i += 1) {
@@ -514,7 +514,7 @@ pub fn applyPlayerDataNetwork(
     var next = inv.*;
 
     // PDF.Write remainder starts with toolbelt ItemStack list
-    var tb: [toolbelt_slots]StockSlot = [_]StockSlot{.{}} ** toolbelt_slots;
+    var tb: [toolbelt_slots]StockSlot = @splat(.{});
     const tb_n = try readItemStackList(&r, tb[0..]);
     var i: usize = 0;
     while (i < toolbelt_slots) : (i += 1) {
@@ -673,7 +673,7 @@ fn readItemValueData(r: *binary.Reader, version: u8, is_modifier: bool) binary.R
         }
     }
 
-    var stats: [max_item_stats]StatEntry = .{StatEntry{}} ** max_item_stats;
+    var stats: [max_item_stats]StatEntry = @splat(StatEntry{});
     var stats_n: u8 = 0;
     if ((flags & item_value_enc_has_stats) != 0) {
         const sc = try r.readByte();
@@ -844,7 +844,7 @@ pub fn countEatableInPlayerInventoryBody(
     var first_ecs: u16 = 0;
     const has_tb = r.readBool() catch return .{ .total = 0, .first_stock = 0, .first_ecs = 0 };
     if (has_tb) {
-        var slots: [toolbelt_slots]StockSlot = [_]StockSlot{.{}} ** toolbelt_slots;
+        var slots: [toolbelt_slots]StockSlot = @splat(.{});
         const n = readItemStackList(&r, slots[0..]) catch 0;
         var i: usize = 0;
         while (i < n) : (i += 1) {
@@ -880,7 +880,7 @@ pub fn countEatableInPlayerInventoryBody(
 pub fn skipPreferenceTracker(r: *binary.Reader) binary.ReadError!void {
     _ = try r.readI32(); // PlayerID
     if (try r.readBool()) {
-        var tmp: [64]StockSlot = [_]StockSlot{.{}} ** 64;
+        var tmp: [64]StockSlot = @splat(.{});
         _ = try readItemStackList(r, tmp[0..]);
     }
     if (try r.readBool()) {
@@ -892,7 +892,7 @@ pub fn skipPreferenceTracker(r: *binary.Reader) binary.ReadError!void {
         }
     }
     if (try r.readBool()) {
-        var tmp: [64]StockSlot = [_]StockSlot{.{}} ** 64;
+        var tmp: [64]StockSlot = @splat(.{});
         _ = try readItemStackList(r, tmp[0..]);
     }
 }
@@ -1149,7 +1149,7 @@ pub fn buildBagPackage(
     /// If true, map inv bag range only; if false, map all slots as bag (loot container).
     player_bag_only: bool,
 ) ![]u8 {
-    var bag: [bag_slots]StockSlot = [_]StockSlot{.{}} ** bag_slots;
+    var bag: [bag_slots]StockSlot = @splat(.{});
     if (player_bag_only) {
         var i: usize = 0;
         while (i < components.inv_bag_count and i < bag_slots) : (i += 1) {
@@ -1191,7 +1191,7 @@ pub const DropItemsParsed = struct {
     x: f32,
     y: f32,
     z: f32,
-    items: [32]StockSlot = [_]StockSlot{.{}} ** 32,
+    items: [32]StockSlot = @splat(.{}),
     item_count: usize = 0,
 };
 

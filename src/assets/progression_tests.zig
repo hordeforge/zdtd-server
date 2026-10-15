@@ -314,7 +314,7 @@ test "perkTotals folds purchased perk levels level-scaled and reverts" {
     const pt = Table{ .attributes = attrs[0..], .perks = perks[0..] };
     var counts: requirements.Counts = .{};
     // No purchases: no deltas.
-    var levels = [_]SkillLevel{.{}} ** 4;
+    var levels: [4]SkillLevel = @splat(.{});
     try std.testing.expect(!perkTotals(&pt, &levels, .{}, &counts).any());
     // Healing Factor level 1: small regen; level 5: the full curve value.
     levels[0] = .{ .name = "perkHealingFactor", .level = 1 };

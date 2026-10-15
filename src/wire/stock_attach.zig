@@ -88,7 +88,7 @@ test "entity attach carries the stock mount and dismount shapes" {
         try std.testing.expectEqual(@as(i16, -32768), rt.slot);
     }
     // AttachType only has 0..3 (asm.il:844620); anything else is not a package.
-    var bogus = [_]u8{4} ++ [_]u8{0} ** 10;
+    var bogus = [_]u8{4} ++ @as([10]u8, @splat(0));
     try std.testing.expectError(error.InvalidEvent, parseEntityAttach(&bogus));
     try std.testing.expectError(error.EndOfStream, parseEntityAttach(bogus[0..10]));
 }

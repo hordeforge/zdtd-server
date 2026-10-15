@@ -24,7 +24,7 @@ pub fn packFaces8(faces: [6]u8) u64 {
 /// Returns 0 if any face id > 255: those atlas ids live on Block.textureInfos
 /// on the client, not in the chunk channel (SetBlockFaceTexture masks to 255).
 pub fn parseTextureValue(s: []const u8) u64 {
-    var faces: [6]u16 = .{0} ** 6;
+    var faces: [6]u16 = @splat(0);
     var fi: usize = 0;
     var it = std.mem.splitScalar(u8, s, ',');
     while (it.next()) |part| {

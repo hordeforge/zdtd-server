@@ -172,20 +172,20 @@ pub const Vending = struct {
     /// TraderID from blocks.xml (TraderData.TraderID; resolves trader_info).
     trader_id: i32 = 0,
     available_money: i32 = 0,
-    stock: [max_vending_stock]StockEntry = [_]StockEntry{.{}} ** max_vending_stock,
+    stock: [max_vending_stock]StockEntry = @splat(.{}),
     stock_n: u8 = 0,
     is_locked: bool = false,
     owner: UserRef = .{},
-    password_hash: [max_password_hash]u8 = .{0} ** max_password_hash,
+    password_hash: [max_password_hash]u8 = @splat(0),
     password_len: u8 = 0,
-    allowed: [max_allowed_users]UserRef = [_]UserRef{.{}} ** max_allowed_users,
+    allowed: [max_allowed_users]UserRef = @splat(.{}),
     allowed_n: u8 = 0,
     /// In-game day the rental expires (0 = not rented; ClearVendingMachine on
     /// currentDay > rental_end_day).
     rental_end_day: i32 = 0,
     /// trader_info Rentable drives the optional nextAutoBuy u64 on the wire.
     rentable: bool = false,
-    next_auto_buy: u64 = 0,
+    /// Session restock clock (`TraderInfo.get_ResetIntervalInTicks`): the row's
 ```
 
 `VendingStore` is a fixed array of 128 records with a `used` bitmap and no heap on the tick path; `getOrCreate` returns null at cap rather than growing, and a freed slot is fully reset before reuse (src/world/vending.zig:104-140). Opening a machine on `LockRequest` fills the store from `trader_info` when `stock_n == 0`, sends the `TraderData` entries under the vending lock context and then pushes the full TE (src/server/c2s/misc.zig:67-82). `fillVendingStore` seeds rows at markup 0 because vending is owner-priced: the `trader_info` buy and sell multipliers do not apply (src/server/game/replicate_te.zig:314-359). The TE body carries the lock flag, owner identity, password string, allowed-user list, rental end day, the same `TraderData` block and, when rentable, `nextAutoBuy` (src/wire/stock_te.zig:850-899).

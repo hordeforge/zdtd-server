@@ -131,6 +131,17 @@ pub fn handleTxn(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8,
                         }
                     }
                     if (ok) {
+                        // T18 stage 1: shadow only. The client push still
+                        // commits. Count a staged stack the server did not
+                        // already hold, so the size of the trust gap is
+                        // measurable before the ledger becomes the authority.
+                        var shadow: u64 = 0;
+                        for (staged, 0..) |slot, i| {
+                            if (slot.item_id == 0 or slot.count == 0) continue;
+                            const held = self.sim.inventory[ps].slots[i];
+                            if (held.item_id != slot.item_id or held.count < slot.count) shadow += 1;
+                        }
+                        if (shadow != 0) self.harness.counters.add(.inv_ledger_events, shadow);
                         self.sim.inventory[ps].slots = staged;
                         self.clampInventoryStacks(&self.sim.inventory[ps]);
                         // Stock minimal ack: success true + count 0 (full
@@ -323,7 +334,7 @@ pub fn handleTxn(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8,
                 // once LootRespawnDays have elapsed.
                 self.ensureContainerLoot(cont, c.slot);
                 var slots: [containers_mod.max_container_slots]packages.stock_inv.StockSlot =
-                    [_]packages.stock_inv.StockSlot{.{}} ** containers_mod.max_container_slots;
+                    @splat(.{});
                 var si: usize = 0;
                 const n: usize = cont.slot_count;
                 while (si < n) : (si += 1) {

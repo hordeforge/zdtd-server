@@ -36,12 +36,12 @@ pub const part_size: usize = 131072;
 /// One patched key: `cells[i]` is set when a mod file wrote column `i`.
 pub const Entry = struct {
     key: []const u8 = "",
-    cells: [max_columns]?[]const u8 = .{null} ** max_columns,
+    cells: [max_columns]?[]const u8 = @splat(null),
 };
 
 pub const Table = struct {
     /// Base header row cells (index 0 is stock's `Key` column).
-    header: [max_columns][]const u8 = .{""} ** max_columns,
+    header: [max_columns][]const u8 = @splat(""),
     header_n: usize = 0,
     entries: []Entry = &.{},
     arena_ptr: ?*std.heap.ArenaAllocator = null,
@@ -214,7 +214,7 @@ fn mergeFile(
     const hn = parseCsvLine(header_line, &hfields);
     if (hn == 0) return;
     // Map this file's column position to the base column index by name.
-    var col_map: [max_columns]?usize = .{null} ** max_columns;
+    var col_map: [max_columns]?usize = @splat(null);
     for (hfields[0..@min(hn, max_columns)], 0..) |name, i| {
         col_map[i] = t.columnIndex(std.mem.trim(u8, stripBom(name), " \t\r"));
     }

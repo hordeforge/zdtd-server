@@ -126,8 +126,8 @@ pub fn applyTraderDataCopyFrom(self: *Game, c: *Client, td: packages.TraderDataT
         // Atomic: validate and map before mutating. Any bad entry aborts without
         // partial trader state. `target` holds the server entry index for each
         // echo entry (-1 = no server match / no mutation yet).
-        var target: [ecs.components.max_stock]i16 = [_]i16{-1} ** ecs.components.max_stock;
-        var used: [ecs.components.max_stock]bool = [_]bool{false} ** ecs.components.max_stock;
+        var target: [ecs.components.max_stock]i16 = @splat(-1);
+        var used: [ecs.components.max_stock]bool = @splat(false);
         var i: usize = 0;
         while (i < read.n) : (i += 1) {
             const src = entries_buf[i];
@@ -177,9 +177,9 @@ pub fn applyTraderDataCopyFrom(self: *Game, c: *Client, td: packages.TraderDataT
     // per-echo mutation as target slot + counts/quality so no partial vending
     // state leaks on a bad tail entry.
     const Pending = struct { slot: i16 = -1, type_id: i32 = 0, count: i32 = 0, quality: u8 = 1, markup: i8 = 0, is_append: bool = false };
-    var pending: [vending_mod.max_vending_stock + ecs.components.max_stock]Pending = [_]Pending{.{}} ** (vending_mod.max_vending_stock + ecs.components.max_stock);
+    var pending: [vending_mod.max_vending_stock + ecs.components.max_stock]Pending = @splat(.{});
     var pending_n: usize = 0;
-    var used_plan: [vending_mod.max_vending_stock]bool = [_]bool{false} ** vending_mod.max_vending_stock;
+    var used_plan: [vending_mod.max_vending_stock]bool = @splat(false);
     // First pass: validate and reserve slots without mutating vm.stock.
     var pi: usize = 0;
     while (pi < read.n) : (pi += 1) {
@@ -205,7 +205,7 @@ pub fn applyTraderDataCopyFrom(self: *Game, c: *Client, td: packages.TraderDataT
             }
         }
     }
-    var used: [vending_mod.max_vending_stock]bool = [_]bool{false} ** vending_mod.max_vending_stock;
+    var used: [vending_mod.max_vending_stock]bool = @splat(false);
     var pj: usize = 0;
     while (pj < pending_n) : (pj += 1) {
         const p2 = pending[pj];

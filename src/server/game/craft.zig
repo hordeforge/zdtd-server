@@ -761,6 +761,9 @@ pub const SpitConfig = struct {
     radius: f32,
     damage: f32,
     block_damage: f32,
+    /// The ammo's ecs id, so the block hit can fold its tagged DamageModifier
+    /// rows. 0 = unknown ammo (the fold is skipped, raw damage lands).
+    ammo_id: u16,
 };
 
 pub fn spitConfigFor(self: *Game, hand_item: []const u8) ?SpitConfig {
@@ -777,6 +780,7 @@ pub fn spitConfigFor(self: *Game, hand_item: []const u8) ?SpitConfig {
         .radius = ammo.projectile_radius,
         .damage = ammo.projectile_damage,
         .block_damage = ammo.projectile_block_damage,
+        .ammo_id = ammo.id,
     };
 }
 

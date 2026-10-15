@@ -36,7 +36,7 @@ const te_types = packages.te_types;
 
 /// All-broken topsoil bitfield (the pre-topsoil look; `topsoil_all_broken`
 /// rule for worlds without splat maps).
-const topsoil_broken = [_]u8{0xFF} ** 32;
+const topsoil_broken: [32]u8 = @splat(0xFF);
 /// Harvest/destroy XML counts parse as unbounded u32; the stack store is u16.
 const max_drop_count: u32 = std.math.maxInt(u16);
 /// Cells in one chunk y-plane (16x16), the contiguous run the whole-chunk

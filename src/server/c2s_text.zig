@@ -139,9 +139,9 @@ test "sanitizePlayerName never splits a UTF-8 codepoint at the cap" {
     // 17 x "é" (2 bytes each) = 34 bytes; the 16-byte-aligned cap must stop at
     // a codepoint boundary, not leave a dangling continuation byte.
     var buf: [32]u8 = undefined;
-    const n = sanitizePlayerName(&buf, "é" ** 17);
+    const n = sanitizePlayerName(&buf, &@import("../util/root.zig").repeat("é", 17));
     try std.testing.expectEqual(@as(usize, 32), n);
-    try std.testing.expectEqualStrings("é" ** 16, buf[0..n]);
+    try std.testing.expectEqualStrings(&@import("../util/root.zig").repeat("é", 16), buf[0..n]);
     // CJK: 3-byte codepoints; a 4-byte cap keeps exactly one full codepoint.
     var tiny: [4]u8 = undefined;
     const nt = sanitizePlayerName(&tiny, "名前");
@@ -187,8 +187,8 @@ test "chatMsgOk length and control bounds" {
     try std.testing.expect(chatMsgOk("hello"));
     try std.testing.expect(!chatMsgOk(""));
     try std.testing.expect(!chatMsgOk("bad\nline"));
-    try std.testing.expect(!chatMsgOk("x" ** (max_chat_msg_len + 1)));
-    try std.testing.expect(chatMsgOk("x" ** max_chat_msg_len));
+    try std.testing.expect(!chatMsgOk(&@import("../util/root.zig").repeat("x", (max_chat_msg_len + 1))));
+    try std.testing.expect(chatMsgOk(&@import("../util/root.zig").repeat("x", max_chat_msg_len)));
     try std.testing.expect(!chatMsgOk("del\x7f"));
 }
 

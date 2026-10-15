@@ -24,12 +24,12 @@ pub fn scrubIllegalMods(self: *Game, ps: ecs.Slot) void {
         if (sl.item_id == 0 or sl.mod_n == 0) continue;
         const item = self.items.byId(sl.item_id) orelse {
             sl.mod_n = 0;
-            sl.mods = .{0} ** 4;
+            sl.mods = @splat(0);
             continue;
         };
         if (sl.mod_n > self.items.modSlotsFor(sl.item_id, sl.quality)) {
             sl.mod_n = 0;
-            sl.mods = .{0} ** 4;
+            sl.mods = @splat(0);
             continue;
         }
         var ok = true;
@@ -46,7 +46,7 @@ pub fn scrubIllegalMods(self: *Game, ps: ecs.Slot) void {
         }
         if (!ok) {
             sl.mod_n = 0;
-            sl.mods = .{0} ** 4;
+            sl.mods = @splat(0);
         }
     }
 }

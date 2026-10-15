@@ -169,14 +169,14 @@ pub const QueueItem = struct {
     /// queued this recipe has a null Recipe object, and `RecipeQueueItem::Read`
     /// leaves it null when hasRecipe is false (asm.il ~272880 IL_0084), which
     /// `HandleRecipeQueue` then dereferences (asm.il ~1331756 IL_006c).
-    recipe: [recipe_blob_max]u8 = [_]u8{0} ** recipe_blob_max,
+    recipe: [recipe_blob_max]u8 = @splat(0),
     recipe_len: u16 = 0,
     /// `RecipeQueueItem.RepairItem` (crafting-recipes.md:216): an
     /// `ItemValue.Write` frame plus `AmountToRepair:u16`. Empty when the entry
     /// is a craft, which is the common case - stock writes `hasRepair = false`
     /// for those. A repair entry has no Recipe (the trailing `Recipe` is
     /// absent, matching `Read`).
-    repair_blob: [recipe_blob_max]u8 = [_]u8{0} ** recipe_blob_max,
+    repair_blob: [recipe_blob_max]u8 = @splat(0),
     repair_blob_len: u16 = 0,
     amount_to_repair: u16 = 0,
 
@@ -218,9 +218,9 @@ pub const CraftComplete = struct {
     /// `EntityPlayerLocal::GiveExp` divides by (craftCount + RecipeUsedCount)
     /// (asm.il ~528534), so this must never reach the wire as 0.
     used_count: u16 = 1,
-    recipe_name: [craft_name_max]u8 = [_]u8{0} ** craft_name_max,
+    recipe_name: [craft_name_max]u8 = @splat(0),
     recipe_name_len: u8 = 0,
-    scrapped: [craft_name_max]u8 = [_]u8{0} ** craft_name_max,
+    scrapped: [craft_name_max]u8 = @splat(0),
     scrapped_len: u8 = 0,
 
     pub fn recipeName(self: *const CraftComplete) []const u8 {
@@ -273,18 +273,18 @@ pub const Workstation = struct {
     /// BlockValue.type the client last reported. `NetPackageTileEntity::ProcessPackage`
     /// drops the whole package when it disagrees with the world block (asm.il ~842882).
     block_id: i32 = 0,
-    fuel: [slots_per_group]components.InvSlot = [_]components.InvSlot{.{}} ** slots_per_group,
-    input: [slots_per_group]components.InvSlot = [_]components.InvSlot{.{}} ** slots_per_group,
-    tools: [slots_per_group]components.InvSlot = [_]components.InvSlot{.{}} ** slots_per_group,
-    output: [slots_per_group]components.InvSlot = [_]components.InvSlot{.{}} ** slots_per_group,
+    fuel: [slots_per_group]components.InvSlot = @splat(.{}),
+    input: [slots_per_group]components.InvSlot = @splat(.{}),
+    tools: [slots_per_group]components.InvSlot = @splat(.{}),
+    output: [slots_per_group]components.InvSlot = @splat(.{}),
     /// lastInput is display-only on the client (melt timer reset) and the server
     /// never reads it, so it rides through as the exact ItemStack bytes received.
-    last_input: [last_input_blob_max]u8 = [_]u8{0} ** last_input_blob_max,
+    last_input: [last_input_blob_max]u8 = @splat(0),
     last_input_blob_len: u16 = 0,
-    queue: [max_ws_queue]QueueItem = [_]QueueItem{.{}} ** max_ws_queue,
-    craft_complete: [max_craft_complete]CraftComplete = [_]CraftComplete{.{}} ** max_craft_complete,
+    queue: [max_ws_queue]QueueItem = @splat(.{}),
+    craft_complete: [max_craft_complete]CraftComplete = @splat(.{}),
     craft_complete_n: u8 = 0,
-    melt: [max_ws_melt]f32 = [_]f32{0} ** max_ws_melt,
+    melt: [max_ws_melt]f32 = @splat(0),
     /// On-wire array lengths, not used prefixes. Defaults are the stock ctor sizes.
     fuel_len: u8 = stock_fuel_len,
     input_len: u8 = stock_input_len,
@@ -708,7 +708,7 @@ pub const Workstation = struct {
 pub const WorkstationStore = struct {
     items: [max_workstations]Workstation = undefined,
 
-    used: [max_workstations]bool = .{false} ** max_workstations,
+    used: [max_workstations]bool = @splat(false),
 
     /// Live workstations, for the console `bents info` row.
     pub fn liveCount(self: *const WorkstationStore) usize {
@@ -1425,7 +1425,7 @@ test "craft complete list evicts the oldest instead of growing" {
 
 test "recipe blob over the cap degrades to no blob rather than truncating" {
     var q: QueueItem = .{};
-    const big = [_]u8{7} ** (recipe_blob_max + 1);
+    const big: [(recipe_blob_max + 1)]u8 = @splat(7);
     q.setRecipeBlob(big[0..]);
     try std.testing.expectEqual(@as(usize, 0), q.recipeBlob().len);
     q.setRecipeBlob(big[0..8]);

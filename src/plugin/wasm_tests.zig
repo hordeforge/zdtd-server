@@ -314,7 +314,7 @@ test "wasm on_player_login join gate: deny reason, allow others" {
 test "core_announce.wasm (zig-built) join/leave says + clock announcements" {
     const Cap = struct {
         var queued: [8][128]u8 = undefined;
-        var queued_len: [8]usize = .{0} ** 8;
+        var queued_len: [8]usize = @splat(0);
         var queued_n: usize = 0;
         var world_time: u32 = 2 * 24000; // day 2
         var blood_moon: u32 = 1;

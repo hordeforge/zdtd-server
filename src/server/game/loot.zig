@@ -289,7 +289,7 @@ pub const RolledItemStats = struct {
 /// stream (`seed ^ index`, like the rest of the loot roll, so a re-roll is
 /// reproducible). Empty for an item with no `<stats>` rows.
 pub fn rollItemStats(self: *Game, item_id: u16, quality: u8, loot_stage: i32, seed: u32) RolledItemStats {
-    var out: [ecs.components.max_item_stats]ecs.components.ItemStat = .{ecs.components.ItemStat{}} ** ecs.components.max_item_stats;
+    var out: [ecs.components.max_item_stats]ecs.components.ItemStat = @splat(ecs.components.ItemStat{});
     var rolled: [ecs.components.max_item_stats]assets_items.RolledGsStat = undefined;
     const d = self.items.byId(item_id) orelse return .{ .stats = out, .n = 0 };
     if (d.stats.len == 0) return .{ .stats = out, .n = 0 };

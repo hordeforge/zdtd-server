@@ -882,7 +882,7 @@ test "formatUnix covers epoch, a known date and a negative timestamp" {
 
 test "bounded strings truncate instead of overflowing" {
     var e: BanEntry = .{};
-    e.id.set("x" ** (max_id + 32));
+    e.id.set(&@import("../util/root.zig").repeat("x", (max_id + 32)));
     try std.testing.expectEqual(max_id, e.id.len);
     e.reason.set("");
     try std.testing.expectEqual(@as(usize, 0), e.reason.len);

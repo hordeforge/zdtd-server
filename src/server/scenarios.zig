@@ -84,14 +84,14 @@ const assets_traders = @import("../assets/traders.zig");
 
 // Module-scope capture for the T21 evidence-observer scenario (the nested
 // vtable fn cannot close over locals).
-var ev_seen: [8]i32 = .{0} ** 8;
+var ev_seen: [8]i32 = @splat(0);
 
 /// Buff observer capture (module scope: the vtable fn cannot close over
 /// locals). Records the last event plus a per-direction tally, so a test can
 /// tell "the hook fired for the removal" from "the hook fired at all".
 var buff_seen_adds: u32 = 0;
 var buff_seen_removes: u32 = 0;
-var buff_seen_name: [32]u8 = .{0} ** 32;
+var buff_seen_name: [32]u8 = @splat(0);
 var buff_seen_name_len: usize = 0;
 var buff_seen_entity: i32 = 0;
 
@@ -719,7 +719,7 @@ test "scenario setblock: peer B receives SetBlock after A edit" {
 
     // Chunk wire layout is unit-tested in packages.zig; join no longer sends intermediate
     // chunks by default (stock clients use local gen). Assert builder still matches.
-    var heights: [256]u8 = .{60} ** 256;
+    var heights: [256]u8 = @splat(60);
     var chbuf: [packages.chunk_stock_envelope_overhead + packages.chunk_body_size]u8 = undefined;
     const ch_body = try packages.buildChunkBody(&chbuf, 0, 0, &heights);
     try std.testing.expectEqual(packages.chunk_stock_envelope_overhead + packages.chunk_body_size, ch_body.len);
@@ -6156,7 +6156,7 @@ test "scenario T20 hard ceiling downgrades client-informed detectors" {
     // T21 wiring: a registered evidence observer receives the event with the
     // EFFECTIVE (post-ceiling) severity. Module-scope capture (the vtable fn
     // cannot close over locals).
-    ev_seen = .{0} ** 8;
+    ev_seen = @splat(0);
     const obs = plugin_api.PluginVTable{
         .name = "evobs",
         .on_evidence = struct {
@@ -6332,6 +6332,55 @@ test "scenario stock InvTx rejects unresolvable item stacks (T18)" {
         try std.testing.expectEqual(@as(u16, 10), g.sim.inventory[ps].slots[3].count);
     }
     std.debug.print("PASS stock-tx-reject: an out-of-range op index is rejected\n", .{});
+}
+
+test "scenario stock InvTx shadow counts an unbacked stack (T18 stage 1)" {
+    // The client push still commits. The shadow counter moves only when the
+    // staged stack is an item the server did not already hold, or a larger
+    // count than it held. A rewrite of the same stack must not move it.
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_stocktx_shadow");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_stocktx_shadow", 0);
+    defer g.destroy();
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    const ps = g.sim.playerByPeer(c.slot).?;
+    const wood = (g.items.byName("resourceWood") orelse return error.SkipZigTest).id;
+    const good_type = packages.stock_inv.items_start_here + @as(i32, wood);
+
+    const before = g.harness.counters.get(.inv_ledger_events);
+    var body: [256]u8 = undefined;
+    var w: binary.Writer = .{ .buf = &body };
+    try w.writeI32(1);
+    for (0..16) |i| try w.writeByte(@intCast(i));
+    try w.writeI32(0);
+    try w.writeI32(0);
+    try w.writeI32(1);
+    try w.writeI16(0);
+    try packages.stock_inv.writeItemStack(&w, .{ .type_id = good_type, .count = 7 });
+    try w.writeI32(3);
+    var frame_buf: [300]u8 = undefined;
+    try g.injectFramed(c, try packages.framed(&frame_buf, "NetPackageInventoryTransactionRequest", w.written()));
+    try std.testing.expectEqual(before + 1, g.harness.counters.get(.inv_ledger_events));
+    try std.testing.expectEqual(wood, g.sim.inventory[ps].slots[3].item_id);
+    try std.testing.expectEqual(@as(u16, 7), g.sim.inventory[ps].slots[3].count);
+
+    var same: [256]u8 = undefined;
+    var sw: binary.Writer = .{ .buf = &same };
+    try sw.writeI32(1);
+    for (0..16) |i| try sw.writeByte(@intCast(i));
+    try sw.writeI32(0);
+    try sw.writeI32(0);
+    try sw.writeI32(1);
+    try sw.writeI16(0);
+    try packages.stock_inv.writeItemStack(&sw, .{ .type_id = good_type, .count = 7 });
+    try sw.writeI32(3);
+    var same_frame: [300]u8 = undefined;
+    try g.injectFramed(c, try packages.framed(&same_frame, "NetPackageInventoryTransactionRequest", sw.written()));
+    try std.testing.expectEqual(before + 1, g.harness.counters.get(.inv_ledger_events));
 }
 
 test "scenario whitelist gate fails closed on an un-keyable identity (admin audit)" {
@@ -6936,16 +6985,16 @@ test "scenario workstation queue: C2S write, craft tick, S2C echo keeps stock ge
     try rw.writeString("forge");
     try rw.writeI32(0);
 
-    var fuel = [_]stock_inv_mod.StockSlot{.{}} ** ws.stock_fuel_len;
+    var fuel: [ws.stock_fuel_len]stock_inv_mod.StockSlot = @splat(.{});
     fuel[0] = .{ .type_id = out_type, .count = 4 };
-    const input = [_]stock_inv_mod.StockSlot{.{}} ** ws.stock_input_len;
-    const tools = [_]stock_inv_mod.StockSlot{.{}} ** ws.stock_tools_len;
-    const output = [_]stock_inv_mod.StockSlot{.{}} ** ws.stock_output_len;
+    const input: [ws.stock_output_len]stock_inv_mod.StockSlot = @splat(.{});
+    const tools: [ws.stock_tools_len]stock_inv_mod.StockSlot = @splat(.{});
+    const output: [ws.stock_output_len]stock_inv_mod.StockSlot = @splat(.{});
     var last_input_buf: [64]u8 = undefined;
     var liw: @import("../wire/binary.zig").Writer = .{ .buf = &last_input_buf };
     for (0..ws.stock_last_input_len) |_| try stock_inv.writeItemStack(&liw, .{});
-    const melt = [_]f32{0} ** ws.stock_melt_len;
-    var queue = [_]ws.QueueItem{.{}} ** ws.stock_queue_len;
+    const melt: [ws.stock_melt_len]f32 = @splat(0);
+    var queue: [ws.stock_queue_len]ws.QueueItem = @splat(.{});
     queue[queue.len - 1] = .{
         .multiplier = 2,
         .is_crafting = true,
@@ -7064,16 +7113,16 @@ test "scenario workstation recipe authority: count and time from recipes.xml" {
     try rw.writeString("forge");
     try rw.writeI32(0);
 
-    var fuel = [_]stock_inv_mod.StockSlot{.{}} ** ws.stock_fuel_len;
+    var fuel: [ws.stock_fuel_len]stock_inv_mod.StockSlot = @splat(.{});
     fuel[0] = .{ .type_id = out_type, .count = 4 };
-    const input = [_]stock_inv_mod.StockSlot{.{}} ** ws.stock_input_len;
-    const tools = [_]stock_inv_mod.StockSlot{.{}} ** ws.stock_tools_len;
-    const output = [_]stock_inv_mod.StockSlot{.{}} ** ws.stock_output_len;
+    const input: [ws.stock_output_len]stock_inv_mod.StockSlot = @splat(.{});
+    const tools: [ws.stock_tools_len]stock_inv_mod.StockSlot = @splat(.{});
+    const output: [ws.stock_output_len]stock_inv_mod.StockSlot = @splat(.{});
     var last_input_buf: [64]u8 = undefined;
     var liw: @import("../wire/binary.zig").Writer = .{ .buf = &last_input_buf };
     for (0..ws.stock_last_input_len) |_| try stock_inv.writeItemStack(&liw, .{});
-    const melt = [_]f32{0} ** ws.stock_melt_len;
-    var queue = [_]ws.QueueItem{.{}} ** ws.stock_queue_len;
+    const melt: [ws.stock_melt_len]f32 = @splat(0);
+    var queue: [ws.stock_queue_len]ws.QueueItem = @splat(.{});
     queue[queue.len - 1] = .{
         .multiplier = 2,
         .is_crafting = true,
@@ -7126,7 +7175,7 @@ test "scenario workstation recipe authority: count and time from recipes.xml" {
         enc(&buf, 4, 97, 7); // CraftingTime (SpeedValues ladder) index 7 = 2.0
         g.sandbox_code = buf[0..7];
         g.tick_n += 1;
-        var queue2 = [_]ws.QueueItem{.{}} ** ws.stock_queue_len;
+        var queue2: [ws.stock_queue_len]ws.QueueItem = @splat(.{});
         queue2[queue2.len - 1] = queue[queue2.len - 1];
         var body2: [4096]u8 = undefined;
         const c2s2 = try stock_te.buildWorkstationTeBody(&body2, 3, wx, wy, wz, 1301, .{
@@ -7152,7 +7201,7 @@ test "scenario workstation recipe authority: count and time from recipes.xml" {
     // (`XUiM_Recipes.FilterRecipesByWorkstation` IL_0010-0025).
     {
         g.workstation_crafting = false;
-        var queue3 = [_]ws.QueueItem{.{}} ** ws.stock_queue_len;
+        var queue3: [ws.stock_queue_len]ws.QueueItem = @splat(.{});
         queue3[queue3.len - 1] = queue[queue.len - 1];
         queue3[queue3.len - 1].output_count = 3;
         queue3[queue3.len - 1].one_item_craft_time = 3.0;
@@ -7186,7 +7235,7 @@ test "scenario workstation recipe authority: count and time from recipes.xml" {
         for (@constCast(g.recipes.defs)) |*rd| {
             if (std.mem.eql(u8, rd.name, "frameShapes:cube")) rd.tags = "learnable";
         }
-        var queue4 = [_]ws.QueueItem{.{}} ** ws.stock_queue_len;
+        var queue4: [ws.stock_queue_len]ws.QueueItem = @splat(.{});
         queue4[queue4.len - 1] = queue[queue.len - 1];
         queue4[queue4.len - 1].output_count = 3;
         queue4[queue4.len - 1].one_item_craft_time = 3.0;
@@ -9145,7 +9194,7 @@ test "scenario TraderData copy-back: out-of-reach ignored, in-reach applied" {
     g.sim.transform[ps].x = 10;
     g.sim.transform[ps].y = 70;
     g.sim.transform[ps].z = 20;
-    vm.stock = [_]vending_mod.StockEntry{.{}} ** vending_mod.max_vending_stock;
+    vm.stock = @as([vending_mod.max_vending_stock]vending_mod.StockEntry, @splat(.{}));
     vm.stock_n = 0;
     vm.available_money = 3000;
     const sell_entry = packages.stock_entity.TraderStockEntry{
@@ -10806,7 +10855,7 @@ test "scenario trader stock persists across restart (traders.zst)" {
             .markup = 0,
             // Rolled ItemValue stats ride the entry (ZTR1 v2); a restart
             // must keep them, not strip them.
-            .stats = [_]quest_mod_components.ItemStat{ .{ .effect = 41, .slot_a = 12, .slot_b = 0 }, .{ .effect = 79, .slot_a = 3, .slot_b = 1 } } ++ [_]quest_mod_components.ItemStat{.{}} ** (quest_mod_components.max_item_stats - 2),
+            .stats = [_]quest_mod_components.ItemStat{ .{ .effect = 41, .slot_a = 12, .slot_b = 0 }, .{ .effect = 79, .slot_a = 3, .slot_b = 1 } } ++ @as([(quest_mod_components.max_item_stats - 2)]quest_mod_components.ItemStat, @splat(.{})),
             .stats_n = 2,
         };
         wood_name = wood.name;
@@ -11110,7 +11159,7 @@ test "scenario ZPV12 record claiming more slots than the array is bounded" {
     // block actually writes for each one rather than skipping on zero.
     var s: usize = 0;
     while (s < claimed) : (s += 1) {
-        var slot = [_]u8{0} ** 21;
+        var slot: [21]u8 = @splat(0);
         std.mem.writeInt(u16, slot[0..2], 7, .little); // item_id
         std.mem.writeInt(u16, slot[2..4], 1, .little); // count
         std.mem.writeInt(u16, slot[13..15], 9, .little); // mods[0]
@@ -13420,7 +13469,7 @@ test "scenario blood-moon music is per-party, not global" {
     // Horde active with only A's party having alive zombies.
     g.sim.director.bloodmoon_active = true;
     const BmParty = @import("../ecs/aidirector.zig").BmParty;
-    g.sim.director.bm_parties = [_]BmParty{.{}} ** @import("../ecs/aidirector.zig").bm_parties_cap;
+    g.sim.director.bm_parties = @as([@import("../ecs/aidirector.zig").bm_parties_cap]BmParty, @splat(.{}));
     g.sim.director.bm_parties[0] = .{
         .focus_x = g.sim.transform[ps_a].x,
         .focus_z = g.sim.transform[ps_a].z,
@@ -13924,9 +13973,9 @@ test "scenario mod scrub rejects illegal attachments server-authoritatively" {
     // Static catalog: a gun (2 mod slots at every tier) tagged for barrel
     // mods, a knife (1 slot, melee-only), and the two mod items.
     var gun: assets_items.ItemDef = .{ .id = 100, .name = "testGun", .tags = "T0,gun,barrelAttachments", .mod_slots_n = 6 };
-    @memcpy(gun.mod_slots_curve[0..6], &[_]f32{2} ** 6);
+    @memcpy(gun.mod_slots_curve[0..6], &@as([6]f32, @splat(2)));
     var knife: assets_items.ItemDef = .{ .id = 101, .name = "testKnife", .tags = "T0,melee,blade", .mod_slots_n = 6 };
-    @memcpy(knife.mod_slots_curve[0..6], &[_]f32{1} ** 6);
+    @memcpy(knife.mod_slots_curve[0..6], &@as([6]f32, @splat(1)));
     const defs = [_]assets_items.ItemDef{
         gun,
         knife,
@@ -15044,6 +15093,7 @@ test "scenario every registered package id survives dispatch with a malformed bo
         if (std.mem.eql(u8, name, "NetPackagePlayerDisconnect") or
             std.mem.eql(u8, name, "NetPackageClientInfo")) continue;
         const before = g.harness.counters.get(.c2s_unhandled);
+        const noop_before = g.harness.counters.get(.c2s_noop);
         // Empty is the coverage probe (a handler that claims the name returns
         // without touching the counter). The bodies after it are the
         // robustness half: a handler that reads a length prefix and then
@@ -15054,10 +15104,13 @@ test "scenario every registered package id survives dispatch with a malformed bo
         //   - 0x7f run: 7-bit-encoded lengths that continue past the body
         //   - one byte: a length prefix with nothing behind it
         g.handlePackage(ca, peer, @intCast(id), &.{}) catch continue;
-        if (g.harness.counters.get(.c2s_unhandled) == before) handled_n += 1;
-        var zero_body: [64]u8 = .{0} ** 64;
-        var ones_body: [64]u8 = .{0xff} ** 64;
-        var cont_body: [64]u8 = .{0x7f} ** 64;
+        // The two stock no-op arms count c2s_noop instead of unhandled; both
+        // are still answered, so they count toward coverage.
+        if (g.harness.counters.get(.c2s_unhandled) != before or
+            g.harness.counters.get(.c2s_noop) != noop_before) handled_n += 1;
+        var zero_body: [64]u8 = @splat(0);
+        var ones_body: [64]u8 = @splat(0xff);
+        var cont_body: [64]u8 = @splat(0x7f);
         const shapes = [_][]const u8{
             zero_body[0..1],  ones_body[0..1],
             zero_body[0..2],  ones_body[0..2],
@@ -15171,7 +15224,7 @@ test "scenario entities.zen vehicle kind byte is range-checked before the cast" 
     defer g.destroy();
 
     // One type-1 (vehicle) record whose kind byte is 0xff: past the enum.
-    var body: [64]u8 = .{0} ** 64;
+    var body: [64]u8 = @splat(0);
     @memcpy(body[0..4], "ZENT");
     std.mem.writeInt(u16, body[4..6], 1, .little); // one record
     body[6] = 1; // rec_type: vehicle
@@ -15405,12 +15458,31 @@ test "scenario the land-claim repair heals damaged blocks and answers the reques
     const cx: i32 = 250;
     const cz: i32 = 250;
     const stone = world_store.block_stone;
-    // Two stone blocks inside the claim, one damaged.
+    // terrStone repairs for 6 resourceCobblestones at full damage (blocks.xml
+    // RepairItems, Mstone MaxDamage 500, ResourceScale 1). Half damage costs
+    // max(1, 0.5 * 6) = 3. The builtin catalog has neither, so the test
+    // supplies both tables.
+    const repair_item = [_]assets_blocks.RepairItem{.{ .item_name = "resourceCobblestones", .count = 6 }};
+    var defs = [_]assets_blocks.BlockDef{.{ .id = stone, .name = "terrStone", .repair_items = &repair_item }};
+    g.blocks.deinit();
+    g.blocks = .{ .defs = &defs };
+    var items = [_]assets_items.ItemDef{.{ .id = 40, .name = "resourceCobblestones", .stack = 6000 }};
+    g.items.deinit();
+    g.items = .{ .defs = &items };
+    const md_arena = try arena_util.ensureLazyArena(&g.maxdamage.arena_ptr, gpa);
+    try g.maxdamage.by_id.put(md_arena, stone, 500);
+    // Two stone blocks inside the claim, one at half damage.
     try g.world.setBlockWorld(cx + 1, 70, cz, stone);
     try g.world.setBlockWorld(cx + 2, 70, cz, stone);
-    try g.setBlockHp(cx + 1, 70, cz, 500);
-    try std.testing.expectEqual(@as(u16, 500), g.getBlockHp(cx + 1, 70, cz));
+    try g.setBlockHp(cx + 1, 70, cz, 250);
+    try std.testing.expectEqual(@as(u16, 250), g.getBlockHp(cx + 1, 70, cz));
     g.registerClaim(cx, 70, cz, owner.entity_id);
+    // The station storage at the keystone. Two short of the cost: stock's
+    // TryRemoveItems takes nothing when one entry is short, so the block stays
+    // damaged until the station can pay.
+    const station = g.containers.getOrCreate(.{ .x = cx, .y = 70, .z = cz }, 8, stone) orelse
+        return error.TestUnexpectedResult;
+    station.setSlot(0, .{ .item_id = 40, .count = 1 });
 
     const repair_id = packages.idOf("NetPackageLandClaimRepair") orelse
         return error.TestUnexpectedResult;
@@ -15423,15 +15495,24 @@ test "scenario the land-claim repair heals damaged blocks and answers the reques
     // A stranger's request is an ownership reject: nothing heals.
     const stranger = try packages.buildLandClaimRepairBody(&rb, cx, 70, cz, true);
     try g.injectFramed(other, try packages.framed(&fb, "NetPackageLandClaimRepair", stranger));
-    try std.testing.expectEqual(@as(u16, 500), g.getBlockHp(cx + 1, 70, cz));
+    try std.testing.expectEqual(@as(u16, 250), g.getBlockHp(cx + 1, 70, cz));
 
-    // The owner's begin-repair heals the damaged block and leaves the clean
-    // one alone; the fix fans out as a SetBlock with damage 0.
+    // The owner, but the station holds 1 of the 3 the block costs: nothing
+    // heals and the station keeps its cobblestone.
+    const short = try packages.buildLandClaimRepairBody(&rb, cx, 70, cz, true);
+    try g.injectFramed(owner, try packages.framed(&fb, "NetPackageLandClaimRepair", short));
+    try std.testing.expectEqual(@as(u16, 250), g.getBlockHp(cx + 1, 70, cz));
+    try std.testing.expectEqual(@as(u16, 1), station.slots[0].count);
+
+    // Funded: the heal takes the 3 and clears the damage. The undamaged block
+    // costs nothing.
+    station.setSlot(0, .{ .item_id = 40, .count = 3 });
     const begin = try packages.buildLandClaimRepairBody(&rb, cx, 70, cz, true);
     cap_a.clear();
     cap_b.clear();
     try g.injectFramed(owner, try packages.framed(&fb, "NetPackageLandClaimRepair", begin));
     try std.testing.expectEqual(@as(u16, 0), g.getBlockHp(cx + 1, 70, cz));
+    try std.testing.expectEqual(@as(u16, 0), station.slots[0].count);
 
     // The repaired cell must arrive as a SetBlock with damage 0.
     var saw_fix = false;
@@ -18939,15 +19020,15 @@ test "scenario material-based forge outputs survive queue validation" {
     try rw.writeString("forge");
     try rw.writeI32(0);
 
-    const fuel = [_]stock_inv_mod.StockSlot{.{}} ** ws.stock_fuel_len;
-    const input = [_]stock_inv_mod.StockSlot{.{}} ** ws.stock_input_len;
-    const tools = [_]stock_inv_mod.StockSlot{.{}} ** ws.stock_tools_len;
-    const output = [_]stock_inv_mod.StockSlot{.{}} ** ws.stock_output_len;
+    const fuel: [ws.stock_output_len]stock_inv_mod.StockSlot = @splat(.{});
+    const input: [ws.stock_input_len]stock_inv_mod.StockSlot = @splat(.{});
+    const tools: [ws.stock_tools_len]stock_inv_mod.StockSlot = @splat(.{});
+    const output: [ws.stock_output_len]stock_inv_mod.StockSlot = @splat(.{});
     var last_input_buf: [64]u8 = undefined;
     var liw: @import("../wire/binary.zig").Writer = .{ .buf = &last_input_buf };
     for (0..ws.stock_last_input_len) |_| try stock_inv.writeItemStack(&liw, .{});
-    const melt = [_]f32{0} ** ws.stock_melt_len;
-    var queue = [_]ws.QueueItem{.{}} ** ws.stock_queue_len;
+    const melt: [ws.stock_melt_len]f32 = @splat(0);
+    var queue: [ws.stock_queue_len]ws.QueueItem = @splat(.{});
     queue[queue.len - 1] = .{
         .multiplier = 1,
         .is_crafting = true,
@@ -19114,7 +19195,7 @@ test "scenario a canvas sign's TE body is stored and replayed" {
     var cbuf: [64]u8 = undefined;
     var cw: binary.Writer = .{ .buf = &cbuf };
     try cw.writeString("prefab");
-    try cw.writeBytes(&([_]u8{9} ** 16));
+    try cw.writeBytes(&@as([16]u8, @splat(9))); // signGuid
     try cw.writeByte(2);
     try cw.writeByte(0);
     try cw.writeBool(false);
@@ -19331,7 +19412,7 @@ test "scenario a placed turret and vehicle are announced to the stock client" {
 
     // A stock turret body: entityType | pos | rot | ItemValue | placer.
     {
-        var sb: [64]u8 = .{0} ** 64;
+        var sb: [64]u8 = @splat(0);
         var w: binary.Writer = .{ .buf = &sb };
         try w.writeI32(turret_hash);
         try w.writeF32(201);
@@ -19360,7 +19441,7 @@ test "scenario a placed turret and vehicle are announced to the stock client" {
 
     // A stock vehicle body: entityType | pos | rot | ItemValue | placer.
     {
-        var sb: [128]u8 = .{0} ** 128;
+        var sb: [128]u8 = @splat(0);
         var w: binary.Writer = .{ .buf = &sb };
         try w.writeI32(vehicle_hash);
         try w.writeF32(203);
@@ -20010,7 +20091,7 @@ test "scenario a predator with a target class list hunts the mob it names" {
         .max_hp = 60,
         .target_class_n = 1,
         .target_class_hashes = blk: {
-            var h: [components_mod.max_target_classes]i32 = .{0} ** components_mod.max_target_classes;
+            var h: [components_mod.max_target_classes]i32 = @splat(0);
             h[0] = prey_hash;
             break :blk h;
         },
@@ -21062,7 +21143,7 @@ test "scenario the paced localization download ships a multi-part blob" {
     }
     g.localization.deinit();
     g.localization = .{ .header = blk: {
-        var h: [assets_localization.max_columns][]const u8 = .{""} ** assets_localization.max_columns;
+        var h: [assets_localization.max_columns][]const u8 = @splat("");
         h[0] = "Key";
         h[1] = "english";
         break :blk h;
@@ -22298,7 +22379,7 @@ test "scenario a canvas sign stores and relays its drawing state" {
             var module: [64]u8 = undefined;
             var mw: wire_binary_mod.Writer = .{ .buf = &module };
             try mw.writeString("prefab");
-            try mw.writeBytes(&([_]u8{7} ** 16));
+            try mw.writeBytes(&@as([16]u8, @splat(7))); // signGuid
             try mw.writeByte(2); // BlendMode
             try mw.writeByte(1); // CanvasRotation
             try mw.writeBool(true); // ShowOnImposter
@@ -22589,7 +22670,10 @@ test "scenario a chopped tree falls and its trunk comes down" {
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
-    const g = try game_mod.Game.create(gpa, dir, 0);
+    // The test seeds no demo hostiles, so the settle impact damage cannot kill a
+    // near-spawn zombie and emit a `Killed` `EntityRemove` during the lifetime
+    // window the assertion below watches.
+    const g = try game_mod.Game.createWithOptions(gpa, dir, 0, .{ .starter_zombies = false });
     defer g.destroy();
 
     const Ids = struct {
@@ -25030,6 +25114,53 @@ test "scenario a spawned drone streams to the observers" {
     std.debug.print("PASS drone: spawned, classed and streamed to the other peer\n", .{});
 }
 
+test "scenario DroneDataSync relays only from the owner" {
+    // NetPackageDroneDataSync (write IL=27) shares the VehicleDataSync header.
+    // The payload stays opaque. The server relays it only when the sender owns
+    // the named drone, and drops a stranger's body and a non-drone target.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+    var cap_a: ln_peer.Capture = .{};
+    var cap_b: ln_peer.Capture = .{};
+    const ca = try g.attachJoinedClient(&cap_a);
+    const cb = try g.attachJoinedClient(&cap_b);
+    const ps = g.sim.playerByPeer(ca.slot).?;
+    g.sim.transform[g.sim.playerByPeer(cb.slot).?] = g.sim.transform[ps];
+    const did = g.sim.spawnDrone(g.sim.transform[ps].x, g.sim.transform[ps].y, g.sim.transform[ps].z, 500, @intCast(ca.slot)).?;
+
+    var body: [16]u8 = undefined;
+    std.mem.writeInt(i32, body[0..4], ca.entity_id, .little);
+    std.mem.writeInt(i32, body[4..8], did, .little);
+    std.mem.writeInt(u16, body[8..10], 1, .little);
+    std.mem.writeInt(u16, body[10..12], 2, .little);
+    body[12] = 0xaa;
+    body[13] = 0xbb;
+    var frame: [64]u8 = undefined;
+    const pkg = packages.idOf("NetPackageDroneDataSync").?;
+    cap_b.clear();
+    try g.injectFramed(ca, try packages.framed(&frame, "NetPackageDroneDataSync", &body));
+    try std.testing.expect(cap_b.indexOfPkgId(pkg) != null);
+
+    // A peer who does not own the drone gets nothing relayed.
+    cap_a.clear();
+    std.mem.writeInt(i32, body[0..4], cb.entity_id, .little);
+    try g.injectFramed(cb, try packages.framed(&frame, "NetPackageDroneDataSync", &body));
+    try std.testing.expect(cap_a.indexOfPkgId(pkg) == null);
+
+    // A body aimed at the owner themselves, not a drone, is dropped.
+    cap_b.clear();
+    std.mem.writeInt(i32, body[0..4], ca.entity_id, .little);
+    std.mem.writeInt(i32, body[4..8], ca.entity_id, .little);
+    try g.injectFramed(ca, try packages.framed(&frame, "NetPackageDroneDataSync", &body));
+    try std.testing.expect(cap_b.indexOfPkgId(pkg) == null);
+}
+
 test "scenario a session spawns its own drone and takes it down on drop" {
     // Drone step 3: the join spawn (stock
     // `DroneManager.SpawnFollowingDronesForPLayer`) and the session-end teardown
@@ -25095,25 +25226,157 @@ test "scenario a drone follows its owner and snaps back from out of range" {
     const c = try g.attachJoinedClient(&cap);
     const ps = g.sim.playerByPeer(c.slot).?;
     const ds = g.sim.slotOfNetId(c.drone_net_id).?;
+    // The seed zombies stand at the spawn. An enemy within 22 m pulls the
+    // drone into attack, so the follow check happens well clear of them.
+    g.sim.transform[ps].x = 2000;
+    g.sim.transform[ps].z = 2000;
+    g.sim.transform[ds].x = 2000;
+    g.sim.transform[ds].z = 2000;
 
+    // The director spawns zombies on the player every full step, and an enemy
+    // within 22 m pulls the drone into attack. Drive the drone tick directly.
+    const tick = @import("game/world_tick.zig");
     // Within the follow distance: at rest (no jitter on a parked owner).
     const parked = g.sim.transform[ds];
-    _ = g.step() catch {};
+    tick.tickDrones(g, 0.05);
     try std.testing.expectApproxEqAbs(parked.x, g.sim.transform[ds].x, 0.001);
 
     // Owner walks 10 m away: the drone closes the gap but stops at 5 m.
     g.sim.transform[ps].x += 10;
     var i: usize = 0;
-    while (i < 40) : (i += 1) _ = g.step() catch {};
+    while (i < 40) : (i += 1) tick.tickDrones(g, 0.05);
     const gap = g.sim.transform[ps].x - g.sim.transform[ds].x;
     try std.testing.expect(gap > 4.9 and gap < 5.5);
 
     // Owner teleports far away: the out-of-range rule snaps the drone back.
     g.sim.transform[ps].x += 100;
-    _ = g.step() catch {};
+    tick.tickDrones(g, 0.05);
     try std.testing.expectApproxEqAbs(g.sim.transform[ps].x, g.sim.transform[ds].x, 0.01);
     try std.testing.expectApproxEqAbs(g.sim.transform[ps].y + 1.5, g.sim.transform[ds].y, 0.01);
     std.debug.print("PASS drone-follow: closes to 5 m and snaps back past 32 m\n", .{});
+}
+
+test "scenario a drone stuns the nearest zombie and ignores one out of range" {
+    // DroneSensors scans 22 m around the owner (ctor IL_0001) and
+    // StunBeamWeapon::Fire (IL=69) applies `buffShocked`. The buff owns the
+    // damage, so the proof is the buff landing, and only on the near zombie.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    const ps = g.sim.playerByPeer(c.slot).?;
+    const ds = g.sim.slotOfNetId(c.drone_net_id).?;
+    g.sim.transform[ps].x = 3000;
+    g.sim.transform[ds].x = 3000;
+
+    const near = g.sim.spawnZombie(3010, 70, g.sim.transform[ps].z, 100).?;
+    const far = g.sim.spawnZombie(3100, 70, g.sim.transform[ps].z, 100).?;
+    const ns = g.sim.slotOfNetId(near).?;
+    const fs = g.sim.slotOfNetId(far).?;
+    const shocked = g.buffs.indexOfName("buffShocked") orelse return error.SkipZigTest;
+
+    @import("game/world_tick.zig").tickDrones(g, 0.05);
+    try std.testing.expect(g.sim.buffsMut(ns).find(shocked) != null);
+    try std.testing.expect(g.sim.buffsMut(fs).find(shocked) == null);
+    try std.testing.expectEqual(@as(u8, 4), @as(u8, @intFromEnum(g.sim.drone_state[ds].state)));
+    std.debug.print("PASS drone-attack: stuns the zombie inside 22 m\n", .{});
+}
+
+test "scenario vomit block damage folds the ammo DamageModifier by material" {
+    // ItemActionProjectile.DamageBlock lands the ammo's DamageBlock, then the
+    // ammo's tagged DamageModifier rows scale it by the block's materials.xml
+    // damage_category (stock vomit: earth base_set 0, stone perc_add -0.5). A
+    // category the ammo has no row for keeps the raw damage. The builtin
+    // catalogs carry none of this, so the test supplies both tables.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+
+    // Above the terrain pins (terrStone 1, terrDirt 5, terrForestGround 7): a
+    // low id reads back as generated terrain and the category lookup misses.
+    const dirt: u16 = 30001;
+    const stone: u16 = 30002;
+    const wood: u16 = 30003;
+    const md_arena = try arena_util.ensureLazyArena(&g.maxdamage.arena_ptr, gpa);
+    try g.maxdamage.id_by_name.put(md_arena, "terrDirt", dirt);
+    try g.maxdamage.name_by_id.put(md_arena, dirt, "terrDirt");
+    try g.maxdamage.block_material.put(md_arena, "terrDirt", "Mdirt");
+    try g.maxdamage.material_category.put(md_arena, "Mdirt", "earth");
+    try g.maxdamage.id_by_name.put(md_arena, "terrStone", stone);
+    try g.maxdamage.name_by_id.put(md_arena, stone, "terrStone");
+    try g.maxdamage.block_material.put(md_arena, "terrStone", "Mstone");
+    try g.maxdamage.material_category.put(md_arena, "Mstone", "stone");
+    try g.maxdamage.id_by_name.put(md_arena, "woodFrameBlock", wood);
+    try g.maxdamage.name_by_id.put(md_arena, wood, "woodFrameBlock");
+    try g.maxdamage.block_material.put(md_arena, "woodFrameBlock", "Mwood");
+    try g.maxdamage.material_category.put(md_arena, "Mwood", "wood");
+    // Above the folded damage (120) so a full hit stays on the damage plane
+    // instead of breaking the block.
+    try g.maxdamage.by_id.put(md_arena, dirt, 500);
+    try g.maxdamage.by_id.put(md_arena, stone, 500);
+    try g.maxdamage.by_id.put(md_arena, wood, 500);
+
+    const rows = [_]assets_buffs.Passive{
+        .{ .name = "DamageModifier", .op = .base_set, .value = 0, .tags = "earth" },
+        .{ .name = "DamageModifier", .op = .perc_add, .value = -0.5, .tags = "stone" },
+    };
+    var items = [_]assets_items.ItemDef{.{ .id = 40, .name = "ammoProjectileZombieVomit", .projectile_block_damage = 120, .passives = &rows }};
+    g.items.deinit();
+    g.items = .{ .defs = &items };
+
+    const zid = g.sim.spawnZombie(4000, 70, 4000, 100).?;
+    const zs = g.sim.slotOfNetId(zid).?;
+    g.sim.class_id[zs].projectile_block_damage = 120;
+    g.sim.class_id[zs].projectile_ammo_id = 40;
+    try g.world.setBlockWorld(4001, 70, 4000, dirt);
+    try g.world.setBlockWorld(4002, 70, 4000, stone);
+    try g.world.setBlockWorld(4003, 70, 4000, wood);
+    g.sim.pushSpitHit(zs, 4001, 70, 4000);
+    g.sim.pushSpitHit(zs, 4002, 70, 4000);
+    g.sim.pushSpitHit(zs, 4003, 70, 4000);
+    @import("game/world_tick.zig").drainSpitHits(g);
+
+    try std.testing.expectEqual(@as(u16, 0), g.getBlockHp(4001, 70, 4000));
+    try std.testing.expectEqual(@as(u16, 60), g.getBlockHp(4002, 70, 4000));
+    try std.testing.expectEqual(@as(u16, 120), g.getBlockHp(4003, 70, 4000));
+    std.debug.print("PASS vomit-damage: earth 0, stone 60, wood 120\n", .{});
+}
+
+test "scenario a sentry drone holds its post while the owner walks off" {
+    // Stock `Sentry` holds a guard post and does not follow (raycast-pathing.md
+    // 6b). The follow tick must not pull it along.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    const ps = g.sim.playerByPeer(c.slot).?;
+    const ds = g.sim.slotOfNetId(c.drone_net_id).?;
+
+    try std.testing.expect(g.sim.drone_state[ds].setState(.sentry));
+    const post = g.sim.transform[ds];
+    g.sim.transform[ps].x += 20;
+    var i: usize = 0;
+    while (i < 40) : (i += 1) _ = g.step() catch {};
+    try std.testing.expectApproxEqAbs(post.x, g.sim.transform[ds].x, 0.001);
+    try std.testing.expectApproxEqAbs(post.z, g.sim.transform[ds].z, 0.001);
+    try std.testing.expectEqual(@as(u8, @intFromEnum(g.sim.drone_state[ds].state)), @as(u8, 1));
 }
 
 test "scenario a player console commands their own drone" {
@@ -25254,16 +25517,24 @@ test "scenario every explicitly client-to-server package reaches a handler" {
             return error.TestUnexpectedResult;
         };
         const before = g.harness.counters.get(.c2s_unhandled);
+        const noop_before = g.harness.counters.get(.c2s_noop);
         g.handlePackage(ca, ca.peer orelse continue, id, &.{}) catch {};
         const after = g.harness.counters.get(.c2s_unhandled);
-        if (std.mem.eql(u8, name, "NetPackageDebug") or
-            std.mem.eql(u8, name, "NetPackageDynamicMesh")) continue;
+        // Debug and DynamicMesh are answered by the dispatch's stock no-op
+        // arm, which counts c2s_noop; both count as handled here.
+        const noop_after = g.harness.counters.get(.c2s_noop);
         if (after != before) {
             std.debug.print("explicit C2S package reached no handler: {s}\n", .{name});
             return error.TestUnexpectedResult;
         }
+        if (std.mem.eql(u8, name, "NetPackageDebug") or
+            std.mem.eql(u8, name, "NetPackageDynamicMesh"))
+        {
+            try std.testing.expect(noop_after != noop_before);
+            continue;
+        }
     }
-    std.debug.print("PASS c2s-explicit: {d} packages reach a handler (2 documented exceptions)\n", .{explicit_c2s.len});
+    std.debug.print("PASS c2s-explicit: {d} packages reach a handler (2 documented no-ops)\n", .{explicit_c2s.len});
 }
 
 test "scenario a join that creates the player record says so" {

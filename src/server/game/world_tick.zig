@@ -23,6 +23,8 @@ const ln_peer = @import("../../litenet/peer.zig");
 const io_fs = @import("../../util/io_fs.zig");
 const admin_xml = @import("../admin_xml.zig");
 const log = @import("../../util/log.zig");
+const assets_buffs = @import("../../assets/buffs.zig");
+const assets_requirements = @import("../../assets/requirements.zig");
 
 /// Current whole world-hour (day*24 + hour), for time-based scheduling.
 /// Power consumer actuation (RE tile-entities-power.md PowerConsumer
@@ -449,10 +451,20 @@ pub fn drainSpitHits(self: *Game) void {
         if (!(raw > 0)) continue;
         const id = self.blockIdAtWorld(h.x, h.y, h.z);
         if (id == 0) continue;
-        // The ammo's tagged DamageModifier rows (stock vomit zeroes earth and
-        // halves stone) are not folded here: they need the per-hit item query
-        // the block path does not run. Recorded, not applied.
-        const dmg: u16 = @intCast(@min(@as(u32, @trunc(raw)), 65535));
+        // Ammo DamageModifier rows tag the block's materials.xml damage_category
+        // (stock vomit: earth 0, stone 0.5). Untagged rows always match; an
+        // unknown ammo or category leaves the raw damage.
+        var scaled = raw;
+        const ammo_id = self.sim.class_id[h.slot].projectile_ammo_id;
+        if (ammo_id != 0) {
+            if (self.items.byId(ammo_id)) |ammo| {
+                if (self.maxdamage.categoryForBlock(id)) |cat| {
+                    var counts: assets_requirements.Counts = .{};
+                    scaled = assets_buffs.namedPassiveFold("DamageModifier", ammo.passives, .{ .level = 1 }, .{ .tags = cat }, raw, &counts);
+                }
+            }
+        }
+        const dmg: u16 = @intCast(@min(@as(u32, @trunc(scaled)), 65535));
         if (dmg == 0) continue;
         const max_hp = self.maxDamageForBlock(id);
         const total = self.addBlockDamage(h.x, h.y, h.z, dmg) catch continue;
@@ -731,13 +743,53 @@ test "the airdrop schedule replays stock in both modes" {
     try std.testing.expectEqual(@as(u64, 124), nextAirdropHour(g, 100));
 }
 
+/// Nearest living enemy within `EnemyDetectionRadius` (22 m, DroneSensors
+/// ctor IL_0001) of the owner. Stock prefers the revenge target; zdtd has no
+/// drone revenge list, so the scan is the whole rule.
+fn nearestEnemy(self: *Game, owner: ecs.Slot) ?ecs.Slot {
+    const ox = self.sim.transform[owner].x;
+    const oz = self.sim.transform[owner].z;
+    const radius: f32 = 22;
+    var best: ?ecs.Slot = null;
+    var best_d: f32 = radius * radius;
+    for (self.sim.kind_groups.slice(.zombie)) |z| {
+        if (!self.sim.alive[z]) continue;
+        const dx = self.sim.transform[z].x - ox;
+        const dz = self.sim.transform[z].z - oz;
+        const d = dx * dx + dz * dz;
+        if (d < best_d) {
+            best = z;
+            best_d = d;
+        }
+    }
+    return best;
+}
+
+/// Stock `StunBeamWeapon::Fire` (IL=69): set `_droneStunDamage` from the mod
+/// quality, then `TargetApplyBuff("buffShocked")`. The buff owns the damage
+/// (`$buffShockedDamage` = -5), so the cvar is not needed here.
+fn droneAttack(self: *Game, target: ecs.Slot) void {
+    const def_id = self.buffs.indexOfName("buffShocked") orelse return;
+    const def = self.buffs.byId(def_id) orelse return;
+    _ = ecs.buff.add(self.sim.buffsMut(target), .{
+        .def_id = def_id,
+        .duration = def.duration,
+        .stack_type = def.stack_type,
+        .update_rate_ticks = def.update_rate_ticks,
+        .remove_on_death = def.remove_on_death,
+    }, ecs.buff.duration_from_class, -1, 0, 0, 0);
+}
+
 /// Per-tick drone follow. Stock `EntityDrone` steers through its own flood-fill
 /// pathing (vehicles-drones-turrets.md section 5); zdtd moves in a straight line
 /// at `cMaxSpeedFlying` = 15 m/s toward the owner's chest, which is the same
 /// destination without the path search - a documented approximation, not the
-/// machine (states, sentry, attack and heal are later slices). The out-of-range
-/// rule is stock's exactly: a drone further than 32 m from its owner's chest is
-/// yanked back (`TeleportOutOfRange`), unless it is parked.
+/// machine. `Sentry` and `Shutdown` hold position (raycast-pathing.md 6b).
+/// Attack engages the nearest enemy within 22 m of the owner and applies
+/// `buffShocked` (StunBeamWeapon::Fire IL=69). Heal still waits on a named
+/// ally. The
+/// out-of-range rule is stock's exactly: a drone further than 32 m from its
+/// owner's chest is yanked back (`TeleportOutOfRange`), unless it is parked.
 pub fn tickDrones(self: *Game, dt: f32) void {
     const follow_distance: f32 = 5; // cBaseFollowDistance
     const teleport_distance: f32 = 32; // TeleportOutOfRange
@@ -752,6 +804,24 @@ pub fn tickDrones(self: *Game, dt: f32) void {
         // recovery leg when travel fails (raycast-pathing.md 6b).
         if (self.sim.drone_state[d].state == .none) self.sim.drone_state[d].state = .idle;
         self.sim.drone_state[d].tick(dt);
+        // `Sentry` holds a guard post and `Shutdown` is powered down
+        // (raycast-pathing.md 6b). Neither follows the owner; both stay put
+        // until an order changes the state.
+        switch (self.sim.drone_state[d].state) {
+            .sentry, .shutdown => continue,
+            else => {},
+        }
+        // Attack is reachable from follow and sentry (raycast-pathing.md 6b).
+        // The stun beam applies `buffShocked`; the buff tick owns the damage.
+        if (self.sim.entity_owner_slot[d] >= 0) {
+            const owner = self.sim.playerByPeer(@intCast(self.sim.entity_owner_slot[d])) orelse continue;
+            if (nearestEnemy(self, owner)) |enemy| {
+                if (self.sim.drone_state[d].state != .attack) _ = self.sim.drone_state[d].setState(.attack);
+                droneAttack(self, enemy);
+                continue;
+            }
+        }
+        if (self.sim.drone_state[d].state == .attack) _ = self.sim.drone_state[d].setState(.follow);
         const owner_slot = self.sim.entity_owner_slot[d];
         if (owner_slot < 0) continue;
         const os: usize = @intCast(owner_slot);
@@ -770,6 +840,9 @@ pub fn tickDrones(self: *Game, dt: f32) void {
             _ = self.sim.drone_state[d].setState(.idle);
             continue;
         }
+        // Owner out of the band: `Idle` -> `Follow`. The table only lists the
+        // reverse, but stock does start following from idle.
+        if (self.sim.drone_state[d].state == .idle) _ = self.sim.drone_state[d].setState(.follow);
         if (flat > teleport_distance) {
             // Travel fails: `Follow` -> `Teleport`, the recovery hop.
             _ = self.sim.drone_state[d].setState(.teleport);

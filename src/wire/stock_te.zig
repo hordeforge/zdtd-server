@@ -357,7 +357,7 @@ pub fn writeStorageFeature(
     // empty locks for count bits
     try w.write7BitEncodedInt(@intCast(count)); // length in bits
     if (count > 0) {
-        const zeros: [32]u8 = .{0} ** 32;
+        const zeros: [32]u8 = @splat(0);
         var left = (@as(usize, @intCast(count)) + 7) / 8;
         while (left > 0) {
             const chunk = @min(left, zeros.len);
@@ -373,7 +373,7 @@ pub const ParsedTe = struct {
     world_y: i32 = 0,
     world_z: i32 = 0,
     block_id: i32 = 0,
-    items: [containers.max_container_slots]stock_inv.StockSlot = [_]stock_inv.StockSlot{.{}} ** containers.max_container_slots,
+    items: [containers.max_container_slots]stock_inv.StockSlot = @splat(.{}),
     item_count: usize = 0,
     size_x: u16 = 0,
     size_y: u16 = 0,
@@ -500,7 +500,10 @@ pub fn validateLockFeatureForTest(blob: []const u8) binary.ReadError!void {
 fn validateCanvasFeature(pr: *binary.Reader, payload_len: usize) binary.ReadError!void {
     const end = pr.pos + payload_len;
     try pr.skipString();
-    if (pr.remaining() < 16) return error.EndOfStream;
+    // A stock canvas state is always the 16-byte guid then blend, rotation and
+    // imposter past the library id. The composite parser has already bounded
+    // the module to the declared body, so a short body is refused here too.
+    if (pr.remaining() < 16 + 3) return error.EndOfStream;
     pr.pos += 16; // signGuid
     _ = try pr.readByte(); // BlendMode
     _ = try pr.readByte(); // CanvasRotation
@@ -1075,13 +1078,13 @@ pub const ParsedCollector = struct {
     world_y: i32 = 0,
     world_z: i32 = 0,
     block_id: i32 = 0,
-    items: [max_collector_slots]stock_inv.StockSlot = [_]stock_inv.StockSlot{.{}} ** max_collector_slots,
+    items: [max_collector_slots]stock_inv.StockSlot = @splat(.{}),
     items_n: u16 = 0,
-    mods: [max_collector_slots]stock_inv.StockSlot = [_]stock_inv.StockSlot{.{}} ** max_collector_slots,
+    mods: [max_collector_slots]stock_inv.StockSlot = @splat(.{}),
     mods_n: u16 = 0,
-    fuel: [max_collector_slots]stock_inv.StockSlot = [_]stock_inv.StockSlot{.{}} ** max_collector_slots,
+    fuel: [max_collector_slots]stock_inv.StockSlot = @splat(.{}),
     fuel_n: u16 = 0,
-    catalyst: [max_collector_slots]stock_inv.StockSlot = [_]stock_inv.StockSlot{.{}} ** max_collector_slots,
+    catalyst: [max_collector_slots]stock_inv.StockSlot = @splat(.{}),
     catalyst_n: u16 = 0,
     is_underwater: bool = false,
     is_blocked: bool = false,
@@ -1204,22 +1207,22 @@ pub const ParsedWorkstation = struct {
     world_y: i32 = 0,
     world_z: i32 = 0,
     block_id: i32 = 0,
-    fuel: [max_ws_slots]stock_inv.StockSlot = [_]stock_inv.StockSlot{.{}} ** max_ws_slots,
+    fuel: [max_ws_slots]stock_inv.StockSlot = @splat(.{}),
     fuel_n: u8 = 0,
-    input: [max_ws_slots]stock_inv.StockSlot = [_]stock_inv.StockSlot{.{}} ** max_ws_slots,
+    input: [max_ws_slots]stock_inv.StockSlot = @splat(.{}),
     input_n: u8 = 0,
-    tools: [max_ws_slots]stock_inv.StockSlot = [_]stock_inv.StockSlot{.{}} ** max_ws_slots,
+    tools: [max_ws_slots]stock_inv.StockSlot = @splat(.{}),
     tools_n: u8 = 0,
-    output: [max_ws_slots]stock_inv.StockSlot = [_]stock_inv.StockSlot{.{}} ** max_ws_slots,
+    output: [max_ws_slots]stock_inv.StockSlot = @splat(.{}),
     output_n: u8 = 0,
-    last_input: [last_input_blob_max]u8 = [_]u8{0} ** last_input_blob_max,
+    last_input: [last_input_blob_max]u8 = @splat(0),
     last_input_blob_len: u16 = 0,
     last_input_n: u8 = 0,
-    queue: [max_ws_queue]QueueItem = [_]QueueItem{.{}} ** max_ws_queue,
+    queue: [max_ws_queue]QueueItem = @splat(.{}),
     queue_n: u8 = 0,
-    craft_complete: [max_craft_complete]CraftComplete = [_]CraftComplete{.{}} ** max_craft_complete,
+    craft_complete: [max_craft_complete]CraftComplete = @splat(.{}),
     craft_complete_n: u8 = 0,
-    melt: [max_ws_melt]f32 = [_]f32{0} ** max_ws_melt,
+    melt: [max_ws_melt]f32 = @splat(0),
     melt_n: u8 = 0,
     is_burning: bool = false,
     burn_time_left: f32 = 0,
@@ -1361,12 +1364,12 @@ pub fn parseWorkstationTeBody(body: []const u8) binary.ReadError!ParsedWorkstati
 /// A stock-shaped body: ctor array lengths, one fuel and one input stack, a
 /// recipe in the active (last) queue slot and one craft-complete record.
 pub fn testWorkstationBody(buf: []u8) ![]u8 {
-    var fuel = [_]stock_inv.StockSlot{.{}} ** workstations.stock_fuel_len;
+    var fuel: [workstations.stock_fuel_len]stock_inv.StockSlot = @splat(.{});
     fuel[0] = .{ .type_id = stock_inv.items_start_here + 3, .count = 5 };
-    var input = [_]stock_inv.StockSlot{.{}} ** workstations.stock_input_len;
+    var input: [workstations.stock_input_len]stock_inv.StockSlot = @splat(.{});
     input[0] = .{ .type_id = stock_inv.items_start_here + 7, .count = 12 };
-    const tools = [_]stock_inv.StockSlot{.{}} ** workstations.stock_tools_len;
-    const output = [_]stock_inv.StockSlot{.{}} ** workstations.stock_output_len;
+    const tools: [workstations.stock_tools_len]stock_inv.StockSlot = @splat(.{});
+    const output: [workstations.stock_output_len]stock_inv.StockSlot = @splat(.{});
     var last_input_buf: [64]u8 = undefined;
     var liw: binary.Writer = .{ .buf = &last_input_buf };
     for (0..workstations.stock_last_input_len) |_| try stock_inv.writeItemStack(&liw, .{});
@@ -1384,7 +1387,7 @@ pub fn testWorkstationBody(buf: []u8) ![]u8 {
     try bw.writeI32(1); // one ingredient
     try stock_inv.writeItemStack(&bw, .{ .type_id = stock_inv.items_start_here + 4, .count = 6 });
 
-    var queue = [_]QueueItem{.{}} ** workstations.stock_queue_len;
+    var queue: [workstations.stock_queue_len]QueueItem = @splat(.{});
     // Distinct values per field: the queue item is positional, so a field
     // sharing a value with its neighbour makes a swap between them invisible.
     // quality left at 0 hid it behind the RepairItem-null bool, and
@@ -1617,7 +1620,7 @@ pub const PoweredTriggerTe = struct {
     is_player_placed: bool = false,
     power_item_type: u8 = 0,
     /// Wires kept up to max_te_wires; wire_total is what the sender declared.
-    wires: [max_te_wires]Vec3i = [_]Vec3i{.{}} ** max_te_wires,
+    wires: [max_te_wires]Vec3i = @splat(.{}),
     wire_n: usize = 0,
     wire_total: u8 = 0,
     parent: Vec3i = .{},

@@ -44,7 +44,7 @@ The remaining fields are `flags: u8`, `mods: [4]u16`, `mod_n: u8`, `mod_qualitie
 
 ```zig
 pub const Inventory = struct {
-    slots: [max_inv_slots]InvSlot = [_]InvSlot{.{}} ** max_inv_slots,
+    slots: [max_inv_slots]InvSlot = @splat(.{}),
     /// Held toolbelt index 0..inv_toolbelt-1, or inv_no_holding.
     holding: u16 = 0,
     /// Open container entity net id (-1 = none).
@@ -70,7 +70,7 @@ pub const Event = struct {
 
 /// Overwrite ring of the last `capacity` successful inv mutations.
 pub const Ledger = struct {
-    events: [capacity]Event = [_]Event{.{}} ** capacity,
+    events: [capacity]Event = @splat(.{}),
     /// Next write index (mod capacity).
     head: u8 = 0,
     /// How many slots hold a real event (0..capacity).

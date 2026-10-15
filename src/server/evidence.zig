@@ -77,7 +77,7 @@ pub const Event = struct {
 };
 
 pub const Ring = struct {
-    events: [max_ring]Event = [_]Event{.{}} ** max_ring,
+    events: [max_ring]Event = @splat(.{}),
     head: usize = 0,
     n: usize = 0,
     total: u64 = 0,

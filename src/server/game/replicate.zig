@@ -88,13 +88,13 @@ pub fn replicate(self: *Game) !void {
     var turret_frame_buf: [game_mod.replicate_frame_cap]u8 = undefined;
     var anim_frame_buf: [game_mod.replicate_frame_cap]u8 = undefined;
 
-    var obs_cx: [game_mod.max_clients]i32 = .{0} ** game_mod.max_clients;
-    var obs_cz: [game_mod.max_clients]i32 = .{0} ** game_mod.max_clients;
-    var obs_r: [game_mod.max_clients]i32 = .{0} ** game_mod.max_clients;
+    var obs_cx: [game_mod.max_clients]i32 = @splat(0);
+    var obs_cz: [game_mod.max_clients]i32 = @splat(0);
+    var obs_r: [game_mod.max_clients]i32 = @splat(0);
     // World positions for the per-kind block radii (stock's table is in
     // blocks; `obs_r` is the chunk-view cell radius the streaming path uses).
-    var obs_wx: [game_mod.max_clients]f32 = .{0} ** game_mod.max_clients;
-    var obs_wz: [game_mod.max_clients]f32 = .{0} ** game_mod.max_clients;
+    var obs_wx: [game_mod.max_clients]f32 = @splat(0);
+    var obs_wz: [game_mod.max_clients]f32 = @splat(0);
     var active: game_mod.ObsMask = 0;
     // Present: joined+entered+peer with a resolved entity cell. Range-remove
     // walks present ∩ ~in_range instead of re-testing cellsInRange per client.
@@ -639,9 +639,9 @@ test "bot spawn encodes once for multiple viewers" {
     cap_b.clear();
     g.bots.bots[0] = .{ .alive = true, .net_id = 123456, .x = 0, .y = 70, .z = 0 };
     g.tick_n = 1;
-    const obs_cx = [_]i32{0} ** game_mod.max_clients;
-    const obs_cz = [_]i32{0} ** game_mod.max_clients;
-    const obs_r = [_]i32{1} ** game_mod.max_clients;
+    const obs_cx: [game_mod.max_clients]i32 = @splat(0);
+    const obs_cz: [game_mod.max_clients]i32 = @splat(0);
+    const obs_r: [game_mod.max_clients]i32 = @splat(1);
     const active = game_mod.bitOf(ca.slot) | game_mod.bitOf(cb.slot);
     const present = active;
     const encoded = g.harness.counters.get(.packages_encoded);

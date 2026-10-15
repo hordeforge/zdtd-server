@@ -25,7 +25,7 @@ pub const Door = struct {
     block_id: u16 = 0,
     /// `TEFeatureLockable` body, replayed verbatim (same validation and cap as
     /// a container lock).
-    lock_blob: [containers.max_lock_feature_bytes]u8 = [_]u8{0} ** containers.max_lock_feature_bytes,
+    lock_blob: [containers.max_lock_feature_bytes]u8 = @splat(0),
     lock_len: u16 = 0,
     /// `autoCloseAtTickTime`: the tick the server closes this door at, 0 when
     /// no timer is armed (`SetOpen` stamps `ticks + AutoCloseTime * 20`).
@@ -80,7 +80,7 @@ test "a trigger opens a door and the auto-close timer shuts it" {
 
 pub const Store = struct {
     items: [max_doors]Door = undefined,
-    used: [max_doors]bool = .{false} ** max_doors,
+    used: [max_doors]bool = @splat(false),
 
     pub fn get(self: *Store, x: i32, y: i32, z: i32) ?*Door {
         for (self.items[0..], self.used[0..]) |*d, u| {

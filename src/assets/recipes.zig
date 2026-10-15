@@ -55,7 +55,7 @@ pub const RecipeDef = struct {
     /// (GetScrapableRecipe, RE crafting-recipes.md IL=77). Not a general
     /// craft recipe; crafting it with no ingredients would mint scrap.
     wildcard_forge_category: bool = false,
-    ingredients: [max_ingredients]Ingredient = [_]Ingredient{.{}} ** max_ingredients,
+    ingredients: [max_ingredients]Ingredient = @splat(.{}),
     ingredient_n: u8 = 0,
     /// `tags` attribute plus the recipe name. Stock RecipesFromXml builds the
     /// tag set as `tags + "," + name` (IL_0180-0191), which is what lets a

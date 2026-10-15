@@ -8,51 +8,39 @@ Sources: [`src/world/store.zig`](../../src/world/store.zig), [`src/world/chunk_f
 
 A chunk is 16 blocks on X and Z and 256 on Y (`src/world/store.zig:37-39`), 65536 cells (`blocks_per_chunk`, `src/world/store.zig:53`). Every plane is addressed by `lx + lz * 16 + y * 256` (`Chunk.blockIndex`, `src/world/store.zig:158-161`). The block, texture, density, damage and stability planes are all optional slices allocated lazily on first write; a chunk that was only streamed never allocates them (`src/world/store.zig:121-135`).
 
-The chunk record (`src/world/store.zig:100`, with doc comments and unrelated neighbours trimmed):
+The chunk record (`src/world/store.zig:220`, with doc comments and unrelated neighbours trimmed):
 
 ```zig
 pub const Chunk = struct {
     pos: ChunkPos,
     y_dim: u32 = 256,
     terrain: ?*const TerrainIds = null,
-    heights: [256]u8 = .{sea_level} ** 256,
-    topsoil: [32]u8 = [_]u8{0} ** 32,
-    blocks: ?[]u32 = null,
-    textures: ?[]u64 = null,
-    densities: ?[]u8 = null,
-    dens_set: ?[]u8 = null, // bitset: 1 = densities[i] is valid TTS paint
-    damages: ?[]u16 = null,
-    stability: ?[]u8 = null,
-    dirty: bool = false,
-    te_scanned: bool = false,
-    power_scanned: bool = false,
-    biome_id: ?u8 = null,
-    last_touch: u64 = 0,
-    allocator: ?std.mem.Allocator = null,
+    heights: [256]u8 = @splat(sea_level),
+    topsoil: [32]u8 = @splat(0),
 ```
 
 `terrain` points at `World.terrain_ids`, so the heightmap fallback in `rawAt` synthesizes live AssignIds terrain rather than module pins (`src/world/store.zig:408-418`). `topsoil` is the stock `m_bTopSoilBroken` bitfield, one bit per XZ column (`src/world/store.zig:112-119`); it is set, never cleared, by `setTopSoilBroken` (`src/world/store.zig:307-311`) including the 1-wide neighbour-chunk pass (`markTopSoilBroken`, `src/world/store.zig:1071-1083`).
 
-`World.chunks` is a pointer-stable map of `*Chunk`, so a `*Chunk` held across a re-entrant `getOrCreate` survives a map resize; chunks are freed only on eviction or `deinit` (`src/world/store.zig:530-537`). Residency is capped at `max_resident_chunks = 4096` (`src/world/store.zig:825`); `evictOneChunk` picks the coldest `last_touch` (minimum key on ties, never HashMap order, so DST replay is stable), saves it, then frees it (`src/world/store.zig:827-857`). The `World` fields that matter here (`src/world/store.zig:825`, trimmed):
+`World.chunks` is a pointer-stable map of `*Chunk`, so a `*Chunk` held across a re-entrant `getOrCreate` survives a map resize; chunks are freed only on eviction or `deinit` (`src/world/store.zig:741`). Residency is capped at `max_resident_chunks = 4096` (`src/world/store.zig:825`); `evictOneChunk` picks the coldest `last_touch` (minimum key on ties, never HashMap order, so DST replay is stable), saves it, then frees it (`src/world/store.zig:827-857`). The `World` fields that matter here (`src/world/store.zig:825`, trimmed):
 
 ```zig
 pub const World = struct {
+    // Pointer-stable chunk store (GAP "Chunk pointer stability", 2026-08-29
+    // PARTIAL): the map holds *Chunk (one allocation per chunk) instead of
+    // inline Chunk values, so a chunk pointer held across a re-entrant
+    // getOrCreate/blockWorld stays valid when the map resizes - a value-map
+    // moved every chunk on resize and dangled the held pointer (bait-soak
+    // segfault 5/5). Chunks are freed on eviction/deinit; residency is still
+    // bounded by `max_resident_chunks`.
     chunks: std.AutoHashMapUnmanaged(u64, *Chunk),
+    /// One bit per deco chunk whose derived decoration was already written into
+    /// the block plane, or loaded with it (see `decoChunkMirrored`).
+    deco_mirrored: [deco_mirrored_bytes]u8 = @splat(0),
     world_dir: []u8,
     allocator: std.mem.Allocator,
     heightmap: ?dtm.Heightmap = null,
     prefabs: ?prefabs_mod.Index = null,
     water: ?water_mod.Sources = null,
-    leveler: water_mod.Leveler = .{},
-    biomes: ?biomes_mod.BiomeMap = null,
-    biome_layers_table: biome_layers.Table = .{},
-    terrain_source: TerrainSource = .flat,
-    profile: protocol.WireProfile = .{},
-    // ... (geometry, worldgen, id-oracle hooks, terrain_ids omitted)
-    async_flush: bool = false,
-    flush: chunk_flush.Flusher = .{},
-    sync_fallbacks: std.atomic.Value(u64) = .init(0),
-    touch_seq: u64 = 0,
 ```
 
 `getOrCreate` is the single entry point for materialization (`src/world/store.zig:859-1026`). It stamps `last_touch`, then tries the disk first: a v3 record carrying blocks is authoritative for every channel regeneration would produce, so the terrain rebuild is skipped (`src/world/store.zig:886-899`). Otherwise it fills heights from DTM, procedural noise or the flat sea level, stamps biome layer columns, applies prefab `.tts` paint plus authored damage, then pours water sources (`src/world/store.zig:900-1011`). A heights-only (ZCH2/v2) record is re-loaded after regen so player edits win over the rebuild (`src/world/store.zig:1012-1022`). World-space writes (`setBlockWorld`, `setBlockRawWorld`, `setBlockTexDensWorld`) all route through `getOrCreate` and then `markTopSoilBroken` (`src/world/store.zig:1044-1062`).
@@ -119,21 +107,21 @@ The queue is bounded by 512 entries and 64 MiB (`src/world/chunk_flush.zig:32-34
 
 Each TE store is a fixed-capacity array of records plus a `used` flag array, keyed by world position. Containers and signs additionally keep a compact `keys` mirror so `get` scans a few KiB instead of striding roughly 500-byte records (`src/world/containers.zig:104-115`; `src/world/signs.zig:38-60`). Positions are absolute world coordinates including Y, so a container in a cave and one on the surface at the same X/Z are distinct entries.
 
-The container record (`src/world/containers.zig:29`, doc comments trimmed):
+The container record (`src/world/containers.zig:34`, doc comments trimmed):
 
 ```zig
 pub const Container = struct {
     pos: PosKey = .{ .x = 0, .y = 0, .z = 0 },
+    /// Stock block id for composite TE (0 = generic).
     block_id: i32 = 0,
-    inv_guid: [16]u8 = .{0} ** 16,
-    slots: [max_container_slots]components.InvSlot = [_]components.InvSlot{.{}} ** max_container_slots,
+    /// Stable TransactionalInventory key (Guid bytes). Deterministic from pos.
+    inv_guid: [16]u8 = @splat(0),
+    slots: [max_container_slots]components.InvSlot = @splat(.{}),
     slot_count: u16 = 8, // default 2x4
-    size_x: u8 = 0,
-    size_y: u8 = 0,
-    touched: bool = false,
-    touched_day: u32 = 0,
-    player_storage: bool = true,
-    loot_list: []const u8 = "",
+    /// Grid size the client observed for this container (loot.xml
+    /// LootContainer size_x/size_y on the stock client's TE write). 0/0 =
+    /// unknown -> the wire writer synthesizes 2xN (or 9x6 above 18 slots).
+    /// Persisted in ZCT3 so a restarted container keeps its real grid shape
 ```
 
 `inv_guid` is deterministic from the position rather than a random GUID, so a client-issued inventory key resolves back to the same container across restarts (`guidFromPos`/`posFromGuid`, `src/world/containers.zig:66-88`); it is the key the C2S inventory path resolves (`src/server/c2s/inv_txn.zig:253`). The table holds 4096 containers (`src/world/containers.zig:15`). When it fills, `getOrCreate` evicts a world container (`player_storage == false`), which regenerates from the next chunk scan, and refuses to evict a player-placed one (`src/world/containers.zig:133-163`). Persisted to `containers.zct` as ZCT3 (full InvSlot stride); ZCT1/ZCT2 still load (`src/world/containers.zig:187-205,269-340`).
@@ -149,26 +137,26 @@ pub const Sign = struct {
 };
 ```
 
-Vending (`src/world/vending.zig:66`):
+Vending (`src/world/vending.zig:65`):
 
 ```zig
 pub const Vending = struct {
     pos: PosKey = .{ .x = 0, .y = 0, .z = 0 },
     block_id: i32 = 0,
+    /// TraderID from blocks.xml (TraderData.TraderID; resolves trader_info).
     trader_id: i32 = 0,
     available_money: i32 = 0,
-    stock: [max_vending_stock]StockEntry = [_]StockEntry{.{}} ** max_vending_stock,
+    stock: [max_vending_stock]StockEntry = @splat(.{}),
     stock_n: u8 = 0,
     is_locked: bool = false,
     owner: UserRef = .{},
-    password_hash: [max_password_hash]u8 = .{0} ** max_password_hash,
+    password_hash: [max_password_hash]u8 = @splat(0),
     password_len: u8 = 0,
-    allowed: [max_allowed_users]UserRef = [_]UserRef{.{}} ** max_allowed_users,
+    allowed: [max_allowed_users]UserRef = @splat(.{}),
     allowed_n: u8 = 0,
+    /// In-game day the rental expires (0 = not rented; ClearVendingMachine on
+    /// currentDay > rental_end_day).
     rental_end_day: i32 = 0,
-    rentable: bool = false,
-    next_auto_buy: u64 = 0,
-};
 ```
 
 Lights (`src/world/light_te.zig:24`):
@@ -192,35 +180,35 @@ pub const Light = struct {
 
 Signs store the applied composite TE body verbatim, handle included, and replay it patched to the unsolicited `255`; the body is not re-encoded from parsed fields (`src/world/signs.zig:8-13`). The budget is 512 bytes per body and 256 signs, with an over-long body or a full table dropping the record while the edit still echoes (`src/world/signs.zig:24-25,62-91`). Persisted to `signs.zsg` (magic ZSG1, `src/world/signs.zig:122-127`). Vending holds 128 machines, 48 stock entries and 8 allowed users each, and persists to `vending.zvn` (magic ZVNM, `src/world/vending.zig:11-15,159,196`). Lights hold 2048 entries (`src/world/light_te.zig:16`).
 
-Workstations are the largest record: four 12-slot item groups (fuel, input, tools, output), the display-only `last_input` blob, a 4-deep craft queue, a craft-complete list, per-slot melt timers, and the on-wire array lengths (`src/world/workstations.zig:249-291`). Key fields (`src/world/workstations.zig:250`, trimmed):
+Workstations are the largest record: four 12-slot item groups (fuel, input, tools, output), the display-only `last_input` blob, a 4-deep craft queue, a craft-complete list, per-slot melt timers, and the on-wire array lengths (`src/world/workstations.zig:269`). Key fields (`src/world/workstations.zig:250`, trimmed):
 
 ```zig
 pub const Workstation = struct {
     x: i32 = 0,
     y: i32 = 0,
     z: i32 = 0,
+    /// BlockValue.type the client last reported. `NetPackageTileEntity::ProcessPackage`
+    /// drops the whole package when it disagrees with the world block (asm.il ~842882).
     block_id: i32 = 0,
-    fuel: [slots_per_group]components.InvSlot = [_]components.InvSlot{.{}} ** slots_per_group,
-    input: [slots_per_group]components.InvSlot = [_]components.InvSlot{.{}} ** slots_per_group,
-    tools: [slots_per_group]components.InvSlot = [_]components.InvSlot{.{}} ** slots_per_group,
-    output: [slots_per_group]components.InvSlot = [_]components.InvSlot{.{}} ** slots_per_group,
-    last_input: [last_input_blob_max]u8 = [_]u8{0} ** last_input_blob_max,
+    fuel: [slots_per_group]components.InvSlot = @splat(.{}),
+    input: [slots_per_group]components.InvSlot = @splat(.{}),
+    tools: [slots_per_group]components.InvSlot = @splat(.{}),
+    output: [slots_per_group]components.InvSlot = @splat(.{}),
+    /// lastInput is display-only on the client (melt timer reset) and the server
+    /// never reads it, so it rides through as the exact ItemStack bytes received.
+    last_input: [last_input_blob_max]u8 = @splat(0),
     last_input_blob_len: u16 = 0,
-    queue: [max_ws_queue]QueueItem = [_]QueueItem{.{}} ** max_ws_queue,
-    craft_complete: [max_craft_complete]CraftComplete = [_]CraftComplete{.{}} ** max_craft_complete,
+    queue: [max_ws_queue]QueueItem = @splat(.{}),
+    craft_complete: [max_craft_complete]CraftComplete = @splat(.{}),
     craft_complete_n: u8 = 0,
-    melt: [max_ws_melt]f32 = [_]f32{0} ** max_ws_melt,
+    melt: [max_ws_melt]f32 = @splat(0),
+    /// On-wire array lengths, not used prefixes. Defaults are the stock ctor sizes.
     fuel_len: u8 = stock_fuel_len,
     input_len: u8 = stock_input_len,
     tools_len: u8 = stock_tools_len,
     output_len: u8 = stock_output_len,
     last_input_len: u8 = stock_last_input_len,
     queue_len: u8 = stock_queue_len,
-    melt_len: u8 = stock_melt_len,
-    is_burning: bool = false,
-    burn_time_left: f32 = 0,
-    // ... (module flags, is_player_placed, geometry_known omitted)
-    dirty: bool = false,
 ```
 
 The `*_len` fields are on-wire array lengths, not used prefixes, so nothing is sent before a client write has told the server the real geometry (`geometry_known`, `src/world/workstations.zig:268-275,286-291`). The store holds 256 stations and persists to `workstations.zws` (magic ZWS1) with records sorted by position (`src/world/workstations.zig:23,702-708`). `removeAt` exists because an entry that outlived its block kept broadcasting and kept coming back from the save file with its old fuel and queue (`src/world/workstations.zig:682-698`).

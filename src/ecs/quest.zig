@@ -325,19 +325,19 @@ pub const QuestDef = struct {
     reward_count: u8 = 1,
     /// Per-reward: true if RewardItem/RewardLootItem (ItemStack after index).
     /// Length used is reward_count (capped at max_reward_flags).
-    reward_has_item: [max_reward_flags]bool = .{false} ** max_reward_flags,
+    reward_has_item: [max_reward_flags]bool = @splat(false),
     /// Parsed `<reward>` list in document order (length reward_n). The journal
     /// wire writes real ItemStacks from these and turn-in pays them out.
-    rewards: [max_reward_flags]RewardSpec = [_]RewardSpec{.{}} ** max_reward_flags,
+    rewards: [max_reward_flags]RewardSpec = @splat(.{}),
     reward_n: u8 = 0,
     /// Parsed `<action>` list in document order (length action_n). UnlockPOI
     /// fires server-side on phase entry; the rest are recorded for the client.
-    actions: [max_actions]QuestActionSpec = [_]QuestActionSpec{.{}} ** max_actions,
+    actions: [max_actions]QuestActionSpec = @splat(.{}),
     action_n: u8 = 0,
     /// Parsed `<event>` blocks (stock QuestClass events; only
     /// TreasureRadiusReduction exists in the stock file). The client triggers
     /// them mid-quest; the server rolls chance and fires the nested spawn.
-    events: [max_quest_events]QuestEventSpec = [_]QuestEventSpec{.{}} ** max_quest_events,
+    events: [max_quest_events]QuestEventSpec = @splat(.{}),
     event_n: u8 = 0,
     /// Ordered phase graph (index i == phase i+1). Empty = legacy single-kind path
     /// keyed on `kind`/`target_count`. Grounded in Quest.AdvancePhase (asm.il 986686).

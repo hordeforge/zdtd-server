@@ -91,7 +91,7 @@ pub fn challengeEchoValid(packet: []const u8) bool {
 }
 
 test "challengeEchoValid" {
-    var pkt: [17]u8 = .{0} ** 17;
+    var pkt: [17]u8 = @splat(0);
     pkt[0] = challenge_marker;
     try std.testing.expect(challengeEchoValid(&pkt));
     pkt[0] = 0;

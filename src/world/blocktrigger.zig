@@ -25,13 +25,13 @@ pub const BlockTrigger = struct {
     y: i32 = 0,
     z: i32 = 0,
     /// Channels this block fires when activated (`TriggersIndices`).
-    triggers: [max_channels]u8 = .{0} ** max_channels,
+    triggers: [max_channels]u8 = @splat(0),
     triggers_n: u8 = 0,
     /// Channels this block listens on (`TriggeredByIndices`).
-    triggered_by: [max_channels]u8 = .{0} ** max_channels,
+    triggered_by: [max_channels]u8 = @splat(0),
     triggered_by_n: u8 = 0,
     /// Channels currently toggled on (`TriggeredValues`, latched inputs).
-    triggered_values: [max_channels]u8 = .{0} ** max_channels,
+    triggered_values: [max_channels]u8 = @splat(0),
     triggered_values_n: u8 = 0,
     /// Deferred-fire latch (`NeedsTriggered`).
     needs_triggered: TriggeredState = .not_triggered,
@@ -161,7 +161,7 @@ pub fn read(r: *std.Io.Reader) !BlockTrigger {
 /// entry `i16 blob_len`, `Vector3i local_pos`, then `blob_len` bytes of
 /// `BlockTrigger.Read`. The wrapper is the prefab's per-POI trigger table.
 pub const TriggerTable = struct {
-    entries: [max_triggers]BlockTrigger = [_]BlockTrigger{.{}} ** max_triggers,
+    entries: [max_triggers]BlockTrigger = @splat(.{}),
     n: u16 = 0,
 
     /// `Chunk.GetBlockTrigger(localPos)` shape: the wiring at a local cell, or
@@ -268,7 +268,7 @@ test "a switch is on only when its trigger has no TriggeredBy wiring" {
     // flipped by a trigger.
     var bt: BlockTrigger = .{};
     try std.testing.expectEqual(@as(u32, 1), bt.switchMetaBit());
-    bt.triggered_by = .{4} ++ .{0} ** 7;
+    bt.triggered_by = .{4} ++ @as([max_channels - 1]u8, @splat(0));
     bt.triggered_by_n = 1;
     try std.testing.expectEqual(@as(u32, 0), bt.switchMetaBit());
 }
@@ -311,7 +311,7 @@ test "the AND/OR combine over the listened channels (UseOrForMultipleTriggers)" 
     bt.use_or = true;
     try std.testing.expect(!bt.isOn());
     // One latched: OR fires, AND does not.
-    bt.triggered_values = .{4} ++ .{0} ** 7;
+    bt.triggered_values = .{4} ++ @as([max_channels - 1]u8, @splat(0));
     bt.triggered_values_n = 1;
     try std.testing.expect(bt.isOn());
     bt.use_or = false;
@@ -324,7 +324,7 @@ test "the AND/OR combine over the listened channels (UseOrForMultipleTriggers)" 
     try std.testing.expect(bt.isOn());
     // A single listen channel is "on" when it is latched, flag or no flag.
     bt.triggered_by_n = 1;
-    bt.triggered_values = .{4} ++ .{0} ** 7;
+    bt.triggered_values = .{4} ++ @as([max_channels - 1]u8, @splat(0));
     bt.triggered_values_n = 1;
     bt.use_or = false;
     try std.testing.expect(bt.isOn());
@@ -343,7 +343,9 @@ test "readTriggerTable follows the pinned wrapper format" {
         3, 0, 0, 0, // z
         // BlockTrigger v5: version, needs, triggers_n, trigger,
         // triggered_by_n, triggered_values_n, exclude, use_or, unlock
-        5, 0, 0, 1, 7, 0, 0, 0, 0, 0,
+        5, 0, 0, 1,
+        7, 0, 0, 0,
+        0, 0,
     };
     var r = std.Io.Reader.fixed(&body);
     const tbl = try readTriggerTable(&r);

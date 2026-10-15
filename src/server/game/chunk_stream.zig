@@ -240,6 +240,31 @@ pub fn sendSpawnArea(self: *Game, peer: *ln_peer.Peer, wx: i32, wz: i32, radius:
     }
 }
 
+/// Arm the paced spawn-area drain without the synchronous core send. Ring 0
+/// is the center, so the drain walks the spawn chunk outward and the client
+/// meshes its first chunks a few ticks after the join package instead of on
+/// the join tick. Idempotent like `sendSpawnArea`'s arm block.
+pub fn armSpawnArea(self: *Game, peer: *ln_peer.Peer, wx: i32, wz: i32, radius: i32) !void {
+    const t = world_store.World.worldToChunk(wx, wz);
+    const r: i32 = @min(@max(radius, 0), self.spawn_area_radius_max);
+    var client_ptr: ?*Client = null;
+    for (&self.clients) |*cl| {
+        if (cl.peer == peer) {
+            client_ptr = cl;
+            break;
+        }
+    }
+    if (client_ptr) |cl| {
+        if (cl.pending_area_r < 0 or cl.pending_area_cx != t.pos.x or cl.pending_area_cz != t.pos.z) {
+            cl.pending_area_r = r;
+            cl.pending_area_cx = t.pos.x;
+            cl.pending_area_cz = t.pos.z;
+            cl.pending_area_ring = 0;
+            cl.pending_area_idx = 0;
+        }
+    }
+}
+
 /// Drain a client's pending spawn-area rings against a SHARED per-tick
 /// budget (`chunk_adds_per_stream_tick` across all clients, center-out;
 /// concurrent joins split it so the tick cannot stack 16+ chunk bodies).

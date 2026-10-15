@@ -445,7 +445,7 @@ test "DeflateFramer rejects undersized buffers and overflows instead of truncati
 
 test "challenge detect" {
     var ch: [17]u8 = undefined;
-    buildChallenge(&ch, .{0} ** 16);
+    buildChallenge(&ch, @splat(0));
     try std.testing.expect(isChallenge(&ch));
     try std.testing.expect(!isChallenge(ch[0..16]));
 }

@@ -65,11 +65,11 @@ pub const HarvestCountRow = struct {
     op: HarvestOp = .base_add,
     /// Flat value, or curve anchors when curve_n > 0.
     value: f32 = 0,
-    curve: [buffs.max_curve_len]f32 = .{0} ** buffs.max_curve_len,
+    curve: [buffs.max_curve_len]f32 = @splat(0),
     curve_n: u8 = 0,
     /// Stock `level=` / `tier=` / `duration=` anchors (PassiveEffect::ModValue).
     /// 0 = implicit Q1..Qmax spread via `curveValueAt`.
-    curve_levels: [buffs.max_curve_len]f32 = .{0} ** buffs.max_curve_len,
+    curve_levels: [buffs.max_curve_len]f32 = @splat(0),
     curve_levels_n: u8 = 0,
     /// Comma list of gating tags ("" = applies to every drop row).
     tags: []const u8 = "",
@@ -167,7 +167,7 @@ pub const ItemDef = struct {
     /// sits at quality 1 + 5i/(n-1), piecewise-linear (RE PassiveEffect.
     /// ModValue IL=796; GetTotalPhysicalArmorRating sums it on the wearer,
     /// combat-damage.md). 0 segments = the item carries no row.
-    phys_resist_curve: [buffs.max_curve_len]f32 = .{0} ** buffs.max_curve_len,
+    phys_resist_curve: [buffs.max_curve_len]f32 = @splat(0),
     phys_resist_n: u8 = 0,
     /// ElementalDamageResist passive (43, `Equipment.CalcDamage` IL=83), same
     /// curve shape. This first-row curve is informational only: the live EDR
@@ -175,7 +175,7 @@ pub const ItemDef = struct {
     /// (`Game.elementalDamageResist`), so a `tags="heat,electrical"` row
     /// resists those types and not cold. The untagged rows in this curve are
     /// the `-.2,.2` jitter, which applies to every non-physical type.
-    elem_resist_curve: [buffs.max_curve_len]f32 = .{0} ** buffs.max_curve_len,
+    elem_resist_curve: [buffs.max_curve_len]f32 = @splat(0),
     elem_resist_n: u8 = 0,
     /// Every `<passive_effect>` row on the item, with its `effect_group` and
     /// row gates, parsed through the shared buffs scanner. The survival tick
@@ -202,13 +202,13 @@ pub const ItemDef = struct {
     /// FastMin(255, EffectManager.GetValue(ModSlots, item, Quality-1))). The
     /// max attached mods for a slot at a given quality. 0 segments = the item
     /// carries no row → no mods allowed (fail closed).
-    mod_slots_curve: [buffs.max_curve_len]f32 = .{0} ** buffs.max_curve_len,
+    mod_slots_curve: [buffs.max_curve_len]f32 = @splat(0),
     mod_slots_n: u8 = 0,
     /// items.xml CraftingSmeltTime passive (PassiveEffects 95, perc_add quality
     /// curve). Forge tools (toolBellows) scale melt duration via
     /// ItemValue.ModifyValue in HandleMaterialInput. 0 segments = no row →
     /// identity (scale 1). Values are perc_add deltas (e.g. -.3 → 0.7×).
-    crafting_smelt_time_curve: [buffs.max_curve_len]f32 = .{0} ** buffs.max_curve_len,
+    crafting_smelt_time_curve: [buffs.max_curve_len]f32 = @splat(0),
     crafting_smelt_time_n: u8 = 0,
     /// items.xml DegradationPerUse passive (base_set, stock
     /// ItemValue.UseTimes wear per use): the durability consumed by one use.
@@ -1416,13 +1416,13 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
             // Armor resist passives (41/42): quality curves. The curve
             // segments are the per-quality values scaled over Q1..Q6 (stock
             // PassiveEffect.ModValue interpolation, RE items.md).
-            var pdr_curve: [buffs.max_curve_len]f32 = .{0} ** buffs.max_curve_len;
+            var pdr_curve: [buffs.max_curve_len]f32 = @splat(0);
             var pdr_n: u8 = 0;
             const pdr_v = xml.passiveEffectValue(body, "PhysicalDamageResist");
             if (pdr_v) |v| {
                 pdr_n = buffs.parseCurveValue(v, &pdr_curve);
             }
-            var edr_curve: [buffs.max_curve_len]f32 = .{0} ** buffs.max_curve_len;
+            var edr_curve: [buffs.max_curve_len]f32 = @splat(0);
             var edr_n: u8 = 0;
             const edr_v = xml.passiveEffectValue(body, "ElementalDamageResist");
             if (edr_v) |v| {
@@ -1435,7 +1435,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
             // ModSlots passive (quality curve, RE items.md CalcModSlotCount):
             // the mod-capacity budget per quality tier; 0 = no row (fail
             // closed in the mod scrub).
-            var mslots_curve: [buffs.max_curve_len]f32 = .{0} ** buffs.max_curve_len;
+            var mslots_curve: [buffs.max_curve_len]f32 = @splat(0);
             var mslots_n: u8 = 0;
             const mslots_v = xml.passiveEffectValue(body, "ModSlots");
             if (mslots_v) |v| {
@@ -1445,7 +1445,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
             try stock_mslots_n.append(allocator, mslots_n);
             // CraftingSmeltTime (PassiveEffects 95, perc_add quality curve):
             // forge tools (toolBellows) scale melt duration. 0 = no row.
-            var smelt_curve: [buffs.max_curve_len]f32 = .{0} ** buffs.max_curve_len;
+            var smelt_curve: [buffs.max_curve_len]f32 = @splat(0);
             var smelt_n: u8 = 0;
             const smelt_v = xml.passiveEffectValue(body, "CraftingSmeltTime");
             if (smelt_v) |v| {
@@ -1542,11 +1542,11 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
                     };
                     if (xml.attr(body, hi, "value")) |v| {
                         if (std.mem.findScalar(u8, v, ',')) |_| {
-                            var curve: [buffs.max_curve_len]f32 = .{0} ** buffs.max_curve_len;
-                            var curve_copy: [buffs.max_curve_len]f32 = .{0} ** buffs.max_curve_len;
+                            var curve: [buffs.max_curve_len]f32 = @splat(0);
+                            var curve_copy: [buffs.max_curve_len]f32 = @splat(0);
                             const cn = buffs.parseCurveValue(v, &curve_copy);
                             @memcpy(curve[0..cn], curve_copy[0..cn]);
-                            var levels: [buffs.max_curve_len]f32 = .{0} ** buffs.max_curve_len;
+                            var levels: [buffs.max_curve_len]f32 = @splat(0);
                             const ln = buffs.parseAnchors(body, hi, &levels);
                             try harvest_rows.append(allocator, .{
                                 .op = row.op,

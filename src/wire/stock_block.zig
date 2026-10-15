@@ -528,6 +528,39 @@ test "an empty change list from an identified client is not a block edit" {
     var one: [1]BlockChange = undefined;
     try std.testing.expectEqual(@as(usize, 0), try parseSetBlockChanges(body, one[0..]));
 }
+/// `NetPackageAnimateBlock` body (read IL=21, _global/NetPackageAnimateBlock.il.txt:54):
+/// `blockPosition` Vector3i (three i32), `animParamater` string, `animType` i32,
+/// `animationInteger` i32, `animationBool` bool. `animationTrigger` is a field but
+/// is never written; the relay forwards the body unchanged, so the server only
+/// needs the length to reject a truncated claim.
+pub fn parseAnimateBlockBody(body: []const u8, name_buf: []u8) binary.ReadError!usize {
+    var r: binary.Reader = .{ .data = body };
+    _ = try r.readI32();
+    _ = try r.readI32();
+    _ = try r.readI32();
+    _ = try r.readStringTruncating(name_buf);
+    _ = try r.readI32();
+    _ = try r.readI32();
+    _ = try r.readBool();
+    return r.pos;
+}
+
+test "animate block body consumes the stock field order" {
+    var buf: [64]u8 = undefined;
+    var w: binary.Writer = .{ .buf = &buf };
+    try w.writeI32(10);
+    try w.writeI32(64);
+    try w.writeI32(-3);
+    try w.writeString("open");
+    try w.writeI32(1);
+    try w.writeI32(7);
+    try w.writeBool(true);
+    const body = w.written();
+    var name_buf: [16]u8 = undefined;
+    try std.testing.expectEqual(body.len, try parseAnimateBlockBody(body, &name_buf));
+    try std.testing.expectError(error.EndOfStream, parseAnimateBlockBody(body[0 .. body.len - 1], &name_buf));
+}
+
 test "block meta accessors match BlockValue get_meta/set_meta" {
     try std.testing.expectEqual(@as(u8, 0), blockMeta(19200));
     try std.testing.expectEqual(@as(u32, 19200 | (2 << 22)), withBlockMeta(19200, 2));

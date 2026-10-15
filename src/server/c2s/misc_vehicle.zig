@@ -25,6 +25,20 @@ pub fn handleVehicle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const
         try self.broadcastExcept("NetPackageVehicleDataSync", body, c.slot);
         return true;
     }
+    if (std.mem.eql(u8, name, "NetPackageDroneDataSync")) {
+        // Same header as VehicleDataSync (write IL=27): senderId i32 |
+        // vehicleId i32 | syncFlags u16 | dataLen u16 | data. The payload is
+        // EntityDrone::ReadSyncData, which zdtd does not decode. Relay it
+        // only when the sender owns the named drone.
+        const s = packages.parseVehicleDataSync(body) catch return true;
+        if (s.sender_id != c.entity_id) return true;
+        const di = self.sim.slotOfNetId(s.vehicle_id) orelse return true;
+        if (self.sim.kind[di] != .drone) return true;
+        const owner = self.sim.entity_owner_slot[di];
+        if (owner < 0 or @as(u16, @intCast(owner)) != c.slot) return true;
+        try self.broadcastExcept("NetPackageDroneDataSync", body, c.slot);
+        return true;
+    }
     if (std.mem.eql(u8, name, "NetPackageVehicleSpawn") and body.len == packages.vehicle_control_len) {
         const vc = packages.parseVehicleControl(body) catch return true;
         const vi = self.sim.slotOfNetId(vc.entity_id) orelse return true;

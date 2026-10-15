@@ -16,7 +16,7 @@ const std = @import("std");
 pub const GameRandom = struct {
     /// `SeedArray` (ctor allocates 56, IL=5); index 0 is unused by the
     /// algorithm, which works 1..55.
-    seed_array: [56]i32 = [_]i32{0} ** 56,
+    seed_array: [56]i32 = @splat(0),
     inext: i32 = 0,
     inextp: i32 = 0,
 

@@ -153,18 +153,18 @@ fn findNodeIdx(sorted: []const u32, id: u16) u16 {
 }
 
 pub const PowerGrid = struct {
-    nodes: [max_nodes]PowerNode = [_]PowerNode{.{}} ** max_nodes,
+    nodes: [max_nodes]PowerNode = @splat(.{}),
     node_n: usize = 0,
-    wires: [max_wires]Wire = [_]Wire{.{}} ** max_wires,
+    wires: [max_wires]Wire = @splat(.{}),
     wire_n: usize = 0,
     /// Saved edges waiting for both endpoint nodes to appear (chunks scan
     /// lazily); reconnectPending drains them as the grid rebuilds.
-    pending_wires: [max_wires]WirePos = [_]WirePos{.{}} ** max_wires,
+    pending_wires: [max_wires]WirePos = @splat(.{}),
     pending_wire_n: usize = 0,
     /// Saved player-set node state waiting for its node to be rebuilt, the
     /// same lazy-chunk problem the pending wires solve: `loadEntities` runs
     /// before any chunk has been scanned, so there is nothing to apply to yet.
-    pending_state: [max_nodes]PendingNodeState = [_]PendingNodeState{.{}} ** max_nodes,
+    pending_state: [max_nodes]PendingNodeState = @splat(.{}),
     pending_state_n: usize = 0,
     next_id: u16 = 1,
     total_gen: f32 = 0,
@@ -655,7 +655,7 @@ pub const PowerGrid = struct {
         for (self.nodes[0..self.node_n]) |*n| n.powered = false;
 
         // Mark reachable from any on generator via wires (undirected).
-        var visited: [max_nodes]bool = .{false} ** max_nodes;
+        var visited: [max_nodes]bool = @splat(false);
         var queue: [max_nodes]usize = undefined;
         var qh: usize = 0;
         var qt: usize = 0;
@@ -681,7 +681,7 @@ pub const PowerGrid = struct {
 
         // Adjacency (CSR) so the BFS visits only incident edges instead of
         // rescanning every wire per dequeued node (was O(nodes x wires)).
-        var deg: [max_nodes]u16 = .{0} ** max_nodes;
+        var deg: [max_nodes]u16 = @splat(0);
         wi = 0;
         while (wi < self.wire_n) : (wi += 1) {
             if (wire_ai[wi] == no_node or wire_bi[wi] == no_node) continue;

@@ -77,8 +77,8 @@ fn buildSectionLocs() [sections_len]tracy.SourceLocation {
 const section_locs: [sections_len]tracy.SourceLocation = buildSectionLocs();
 
 pub const Profiler = struct {
-    hist: [sections_len]metrics.LatencyHist = [_]metrics.LatencyHist{.{}} ** sections_len,
-    open: [sections_len]?u64 = [_]?u64{null} ** sections_len,
+    hist: [sections_len]metrics.LatencyHist = @splat(.{}),
+    open: [sections_len]?u64 = @splat(null),
 
     /// Raw begin/end are not Tracy-mapped: Tracy validates strict LIFO nesting
     /// per thread, which only `scope`/`Scope.end` guarantees. Use `scope`.

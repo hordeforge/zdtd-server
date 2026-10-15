@@ -41,7 +41,7 @@ pub const Warp = struct {
     //   rotation offsetScale; perspective: rotation(vec3) strength;
     // arc: rotation radius width; stretch: offset(vec2) rotation distance
     //   width height(5th); grid: mode(i32) offset(vec2) rotation scale(vec2).
-    f: [6]f32 = .{0} ** 6,
+    f: [6]f32 = @splat(0),
 };
 
 pub const Layer = struct {
@@ -61,7 +61,7 @@ pub const Layer = struct {
     //   shapeMode(u8); noise: seed(i32) detail(i32) softness dilate fade.
     text_a: []const u8 = "",
     text_b: []const u8 = "",
-    f: [7]f32 = .{0} ** 7,
+    f: [7]f32 = @splat(0),
     i: [2]i32 = .{ 0, 0 },
     b: [2]u8 = .{ 0, 0 },
     children: []const Layer = &.{},

@@ -34,7 +34,7 @@ The manager is a fixed array plus the schedule-relevant scalars, all copyable an
 
 ```zig
 pub const Manager = struct {
-    states: [max_biomes]BiomeState = [_]BiomeState{.{}} ** max_biomes,
+    states: [max_biomes]BiomeState = @splat(.{}),
     n: u8 = 0,
     rand: rng.XorShift32 = .init(1),
     storm_frequency: f32 = 1,
@@ -52,12 +52,12 @@ pub const Manager = struct {
 
 ## What crosses the wire
 
-`NetPackageWeather` has no count prefix. The client sizes its read from its own `biomeWeather.Count`, and the server sizes the body from the loaded table's `weather_n`, so the two agree only when both sides loaded the same biomes.xml; the padding and trimming comment states the earlier pinned count of five produced wrong-length bodies on modlet installs (`src/server/game/weather.zig:30`, `src/server/game/weather.zig:35`). The table keeps the ordered ids parallel to the group sets (`src/assets/biome_layers.zig:213`):
+`NetPackageWeather` has no count prefix. The client sizes its read from its own `biomeWeather.Count`, and the server sizes the body from the loaded table's `weather_n`, so the two agree only when both sides loaded the same biomes.xml; the padding and trimming comment states the earlier pinned count of five produced wrong-length bodies on modlet installs (`src/server/game/weather.zig:30`, `src/server/game/weather.zig:35`). The table keeps the ordered ids parallel to the group sets (`src/assets/biome_layers.zig:215`):
 
 ```zig
-    weather_ids: [max_weather_biomes]u8 = .{0} ** max_weather_biomes,
+    weather_ids: [max_weather_biomes]u8 = @splat(0),
     /// Parallel to weather_ids.
-    weather_groups: [max_weather_biomes]WeatherGroupSet = [_]WeatherGroupSet{.{}} ** max_weather_biomes,
+    weather_groups: [max_weather_biomes]WeatherGroupSet = @splat(.{}),
     weather_n: u8 = 0,
 ```
 

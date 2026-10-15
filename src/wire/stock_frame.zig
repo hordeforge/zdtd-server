@@ -88,7 +88,7 @@ test "NetPackageChunk resolves to an id and frames at that id" {
     // stamps the same id `idOf` returns - a mismatch there would send terrain
     // under a header the client resolves to some other package.
     const chunk_id = idOf("NetPackageChunk") orelse return error.TestUnexpectedResult;
-    var heights: [256]u8 = .{70} ** 256;
+    var heights: [256]u8 = @splat(70);
     var body_buf: [512]u8 = undefined;
     const body = try buildChunkBody(&body_buf, -18, 28, &heights);
     try std.testing.expectEqual(@as(usize, chunk_stock_envelope_overhead + chunk_body_size), body.len);

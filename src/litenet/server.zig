@@ -14,7 +14,7 @@ const drain_error_every: u32 = 64;
 pub const Server = struct {
     sock: udp.Socket = .{},
     port: u16 = 0,
-    peers: [max_peers]peer_mod.Peer = [_]peer_mod.Peer{.{}} ** max_peers,
+    peers: [max_peers]peer_mod.Peer = @splat(.{}),
     next_local_id: i32 = 1,
     /// Socket faults seen by `drainControl` (the mid-send ack drain). It
     /// returns void, so this is the only place the fault is recorded.
@@ -29,8 +29,8 @@ pub const Server = struct {
     /// Source-IP table for the rate limit (host-order keys; 0 = empty slot).
     /// Append-only with oldest-entry eviction, so the limit never silently
     /// expires after the table fills.
-    join_ip: [64]u32 = .{0} ** 64,
-    join_ip_ms: [64]u64 = .{0} ** 64,
+    join_ip: [64]u32 = @splat(0),
+    join_ip_ms: [64]u64 = @splat(0),
     join_ip_n: usize = 0,
     /// Rejected ConnectRequests since start. Only the log is sampled off this;
     /// the count itself stays exact so a brute force is still visible.

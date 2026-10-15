@@ -153,8 +153,8 @@ const Assembly = struct {
     frag_id: u16 = 0,
     total: u16 = 0,
     got: u16 = 0,
-    have: [max_frag_parts]bool = .{false} ** max_frag_parts,
-    part_len: [max_frag_parts]u16 = .{0} ** max_frag_parts,
+    have: [max_frag_parts]bool = @splat(false),
+    part_len: [max_frag_parts]u16 = @splat(0),
     /// Part payload storage (part i starts at i * max_fragment_user).
     parts: [max_frag_parts][packet.max_fragment_user]u8 = undefined,
 };
@@ -192,9 +192,9 @@ pub const Peer = struct {
     remote_window_start: u16 = 0,
     remote_seq_next: u16 = 0,
     /// Bits for remote sequences currently in window (for duplicate detect + acks).
-    ack_bits: [ack_bitmap_bytes]u8 = .{0} ** ack_bitmap_bytes,
+    ack_bits: [ack_bitmap_bytes]u8 = @splat(0),
     must_ack: bool = false,
-    pending: [pending_cap]Pending = [_]Pending{.{}} ** pending_cap,
+    pending: [pending_cap]Pending = @splat(.{}),
     /// Earliest time the next resendPending window scan is worth doing. The
     /// WindowFull retry loops call resendPending thousands of times per stall;
     /// without this gate each call walks all 64 pending slots (91 KiB stride at
@@ -231,7 +231,7 @@ pub const Peer = struct {
     /// completed message delivers on completion (its payload lives in
     /// deliver_buf, which cannot be parked here). Bounded by the window; when
     /// a slot is busy the payload falls back to on-first-sight delivery.
-    hold_len: [packet.window_size]u16 = .{0} ** packet.window_size,
+    hold_len: [packet.window_size]u16 = @splat(0),
     hold_data: [packet.window_size][packet.max_single_user]u8 = undefined,
     /// Extra user payloads from LiteNet Merged packets (multiple game msgs per
     /// UDP). Byte budget = the full 64-slot mailbox at max payload each
@@ -865,7 +865,7 @@ test "processAck advances local window when bits set" {
     peer.pending[1] = .{ .used = true, .seq = 1, .len = 8 };
     peer.pending[2] = .{ .used = true, .seq = 2, .len = 8 };
 
-    var ack: [13]u8 = .{0} ** 13;
+    var ack: [13]u8 = @splat(0);
     ack[0] = packet.makeByte0(.ack, 0);
     std.mem.writeInt(u16, ack[1..3], 0, .little); // window start
     ack[3] = 2; // ReliableOrdered channel id

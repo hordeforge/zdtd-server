@@ -196,7 +196,7 @@ fn writeSignEntry(w: *binary.Writer, e: SignEntry) !void {
 }
 
 test "sign batch empty layers" {
-    var g: [16]u8 = .{0} ** 16;
+    var g: [16]u8 = @splat(0);
     g[0] = 1;
     // The four next_* counters and modified_ticks default to 0, which left
     // them indistinguishable from each other and from the literal 0 layer
@@ -244,7 +244,7 @@ test "sign layer encode round-trips the stock field order" {
     const e = [_]SignEntry{.{
         .library = "lib",
         .name = "S",
-        .guid = .{0} ** 16,
+        .guid = @splat(0),
         .layers = &[_]signs.Layer{.{
             .kind = signs.layer_polygon,
             .name = "p",

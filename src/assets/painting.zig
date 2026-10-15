@@ -18,7 +18,7 @@ pub const Entry = struct {
 
 pub const Table = struct {
     /// paint_id → texture_id (0xFFFF = unset)
-    paint_to_tex: [max_paints]u16 = .{0xFFFF} ** max_paints,
+    paint_to_tex: [max_paints]u16 = @splat(0xFFFF),
     entries: []const Entry = &.{},
     arena_ptr: ?*std.heap.ArenaAllocator = null,
     n: usize = 0,

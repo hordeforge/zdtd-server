@@ -57,8 +57,8 @@ test "sleeper scan job batch matches the serial pass" {
     const px = [_]f32{ 1, 31, 101 };
     const py = [_]f32{ 1, 1, 1 };
     const pz = [_]f32{ 1, 1, 1 };
-    var serial: [vols.len]u8 = .{0} ** vols.len;
-    var batched: [vols.len]u8 = .{0} ** vols.len;
+    var serial: [vols.len]u8 = @splat(0);
+    var batched: [vols.len]u8 = @splat(0);
 
     const base = Game.SleeperScanCtx{ .sl = &st, .px = &px, .py = &py, .pz = &pz, .hit = serial[0..] };
     Game.SleeperScanCtx.work(base, 0, vols.len);
@@ -6700,7 +6700,7 @@ test "equipped item mods fold their passives (layer 13, stock data)" {
     try std.testing.expect(g.elementalDamageResist(ps, "heat") < heat_before + 0.02);
 
     // Removing the mods drops their rows on the next read (no sticky state).
-    g.sim.inventory[ps].slots[eq].mods = .{0} ** 4;
+    g.sim.inventory[ps].slots[eq].mods = @splat(0);
     g.sim.inventory[ps].slots[eq].mod_n = 0;
     try std.testing.expectApproxEqAbs(heat_before, g.elementalDamageResist(ps, "heat"), 0.005);
 
@@ -6717,7 +6717,7 @@ test "equipped item mods fold their passives (layer 13, stock data)" {
     try g.step();
     try std.testing.expectApproxEqAbs(pdr_before + 0.01, ecs.inventory.armorMitigation(&g.sim, cl.slot), 0.002);
 
-    g.sim.inventory[ps].slots[eq].mods = .{0} ** 4;
+    g.sim.inventory[ps].slots[eq].mods = @splat(0);
     g.sim.inventory[ps].slots[eq].mod_n = 0;
     const held_slot = g.sim.inventory[ps].holding;
     if (held_slot < ecs.components.inv_toolbelt) {

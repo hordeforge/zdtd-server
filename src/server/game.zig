@@ -260,7 +260,7 @@ pub const Game = struct {
     /// Sleeper wake/stage radius (m) for `partyStageAround` staging
     /// (`[sim] sleeper_party_radius`, default 100; see PROVENANCE.md §3.7).
     sleeper_party_radius: f32 = 100.0,
-    clients: [max_clients]Client = [_]Client{.{}} ** max_clients,
+    clients: [max_clients]Client = @splat(.{}),
     harness: apm.Harness = .{},
     /// P4 observe ring (admin `evidence` dumps JSONL lines).
     evidence: evidence_mod.Ring = .{},
@@ -557,35 +557,35 @@ pub const Game = struct {
     /// from the prefab scan on chunk fill; no persistence file.
     light_te: light_te_mod.Store = .{},
     /// Lock table: channel → holder peer slot (-1 free).
-    lock_channel: [16]i32 = .{-1} ** 16,
-    lock_holder_entity: [16]i32 = .{-1} ** 16,
+    lock_channel: [16]i32 = @splat(-1),
+    lock_holder_entity: [16]i32 = @splat(-1),
     /// When the lock was granted (mono ns); 0 = free. Stale holders auto-release.
-    lock_granted_ns: [16]u64 = .{0} ** 16,
+    lock_granted_ns: [16]u64 = @splat(0),
     /// Position key for the locked TE (packed xyz); 0 = channel-only lock.
-    lock_pos_key: [16]u64 = .{0} ** 16,
+    lock_pos_key: [16]u64 = @splat(0),
     /// Per-IP join throttle (ms since epoch-ish via monoNs/1e6). GAP 12: was 16,
     /// so a busy subnet's extra sources were unthrottled rather than dropped.
     /// GAP 12: was 32; a long-lived server can ban more than a handful of
     /// players without silently forgetting the tail.
-    ban_ip: [128]u32 = .{0} ** 128,
+    ban_ip: [128]u32 = @splat(0),
     ban_n: usize = 0,
     /// Sparse BlockValue.rawData (rotation/meta bits) for door/shape fidelity.
     /// The chunk plane is the source of truth (GAP 13); this cache mirrors the
     /// hot path write-through. `blockRawAt` prefers a resident chunk over a
     /// hit so a plane-only writer cannot serve stale meta; eviction is a
     /// cache miss, not content loss.
-    block_raw_key: [max_block_raw_entries]u64 = .{0} ** max_block_raw_entries,
-    block_raw: [max_block_raw_entries]u32 = .{0} ** max_block_raw_entries,
+    block_raw_key: [max_block_raw_entries]u64 = @splat(0),
+    block_raw: [max_block_raw_entries]u32 = @splat(0),
     block_raw_n: usize = 0,
     /// Last-sent EntityLookAt target per entity slot (RE
     /// EntityAlive.SetLookPosition, protocol-packages.md §5.2.1): the 0.0016
     /// sqr-delta gate skips re-sends until the look moves ~0.04 blocks, so
     /// the per-tick look pass is quiet between meaningful target changes.
-    entity_look_sent: [ecs.max_entities]EntityLookSent = [_]EntityLookSent{.{}} ** ecs.max_entities,
+    entity_look_sent: [ecs.max_entities]EntityLookSent = @splat(.{}),
     /// Edge detector for NetPackageSetAttackTarget: stock sends on every
     /// change, so the per-tick target value only goes out when it differs
     /// from what this slot last published.
-    attack_target_sent: [ecs.max_entities]AttackTargetSent = [_]AttackTargetSent{.{}} ** ecs.max_entities,
+    attack_target_sent: [ecs.max_entities]AttackTargetSent = @splat(.{}),
     /// Ticks until the next NetPackagePersistentPlayerPositions broadcast
     /// (stock GameManager.playerPositionsCountdownTimer, 6 s cadence).
     player_positions_timer: u16 = 0,
@@ -595,10 +595,10 @@ pub const Game = struct {
     /// Last-sent EntityVelocity vy per entity slot (RE NetEntityDistributionEntry
     /// motion updates): re-sends only when the vertical velocity moves past
     /// 0.1, so falls/jumps stream while rest stays quiet. Gen-pinned per slot.
-    entity_vel_sent: [ecs.max_entities]VelYSent = [_]VelYSent{.{}} ** ecs.max_entities,
+    entity_vel_sent: [ecs.max_entities]VelYSent = @splat(.{}),
     /// Last-sent TurretSync (target, on) per entity slot (RE EntityTurret:
     /// re-broadcasts when the target/on state changes, so turrets aim live).
-    turret_sync_sent: [ecs.max_entities]TurretSyncSent = [_]TurretSyncSent{.{}} ** ecs.max_entities,
+    turret_sync_sent: [ecs.max_entities]TurretSyncSent = @splat(.{}),
     view_radius: i32 = default_view_radius,
     /// `ServerMaxAllowedViewDistance` (GamePrefs 190), the ceiling stock clamps
     /// a joining client's requested `chunkViewDim` to.
@@ -771,7 +771,7 @@ pub const Game = struct {
     /// Stock ConsoleCmdCommandPermission: per-command required permission
     /// level (0 = no extra requirement; lower = more privileged, matching the
     /// stock 0..1000 direction). Enforced at the in-game console boundary.
-    command_levels: [32]CommandLevel = [_]CommandLevel{.{}} ** 32,
+    command_levels: [32]CommandLevel = @splat(.{}),
     command_levels_n: u8 = 0,
 
     /// Heap-allocate and init (tests and helpers). Caller must `deinit` then `allocator.destroy`.
@@ -1992,8 +1992,8 @@ pub const Game = struct {
         return game_world.removeClaimAt(self, x, y, z);
     }
 
-    pub fn repairClaimArea(self: *Game, cx: i32, cz: i32) u32 {
-        return game_world.repairClaimArea(self, cx, cz);
+    pub fn repairClaimArea(self: *Game, cx: i32, cy: i32, cz: i32) u32 {
+        return game_world.repairClaimArea(self, cx, cy, cz);
     }
 
     pub fn dropClaimsForName(self: *Game, name: []const u8) u32 {
@@ -3315,6 +3315,11 @@ pub const Game = struct {
 
     pub fn sendSpawnArea(self: *Game, peer: *ln_peer.Peer, wx: i32, wz: i32, radius: i32) !void {
         return game_chunk_stream.sendSpawnArea(self, peer, wx, wz, radius);
+    }
+
+    /// Arm the paced spawn-area drain without the synchronous core send.
+    pub fn armSpawnArea(self: *Game, peer: *ln_peer.Peer, wx: i32, wz: i32, radius: i32) !void {
+        return game_chunk_stream.armSpawnArea(self, peer, wx, wz, radius);
     }
 
     /// Drain a client's pending spawn-area rings against the shared per-tick

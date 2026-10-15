@@ -210,7 +210,7 @@ test "pick tolerates a huge modded weight" {
 }
 
 test "pick roll scales a legal max-weight group without overflow" {
-    var entries = [_]Entry{.{ .name = "zombieA", .weight = max_group_weight }} ** 4096;
+    var entries: [4096]Entry = @splat(.{ .name = "zombieA", .weight = max_group_weight });
     entries[3108].name = "zombieB";
     const groups = [_]Group{.{ .name = "g", .entries = &entries, .weight_sum = max_group_weight * 4096 }};
     const t: GroupTable = .{ .groups = &groups };

@@ -769,9 +769,9 @@ fn fireVomit(w: *World, s: Slot, ai: *c.ZombieAi, np: TargetSnap, ct: *const c.C
 /// folds (armor/GDR) and the attacker's held-item rows (infection counter,
 /// abrasion) run through applyDeferredDamage exactly like a landed punch.
 /// A solid cell retires the shot and pushes a block impact; the Game drain
-/// applies the ammo's DamageBlock (stock vomit 120). Not modelled: the 4 s
-/// LifeTime, the lingering acid pool, and the ammo's tagged DamageModifier
-/// rows (earth 0, stone 0.5). Gravity terminates a miss.
+/// applies the ammo's DamageBlock (stock vomit 120) folded by the ammo's
+/// tagged DamageModifier rows. Not modelled: the 4 s LifeTime and the
+/// lingering acid pool. Gravity terminates a miss.
 fn advanceSpit(w: *World, s: Slot, dt: f32, dmg_fp: []u32, dmg_attacker: []u16, hits: *std.atomic.Value(u32)) void {
     if (!w.mask[s].zombie_ai) return;
     const ai = &w.zombie_ai[s];
@@ -919,9 +919,9 @@ fn rngFrac(ai: *c.ZombieAi, rng_seed: i32) f32 {
 
 /// `EAIBreakBlock.AttackBlock` strike delay in seconds: `(0.25 +
 /// RandomFloat * 0.8 + 0.75)`, i.e. 1.0..1.8 s (entity-ai.md:1817-1825). The
-/// `* 0.5` unreachable-above arm is not modelled: zdtd's chew path only runs
-/// when the zombie is pressed against cover, which is the reachable case.
-/// Draws the entity's shared stream, like stock's one GameRandom per entity.
+/// `* 0.5` arm keys on `moveHelper.IsUnreachableAbove`, a pathing flag zdtd
+/// does not model, so there is no honest input for it. Draws the entity's
+/// shared stream, like stock's one GameRandom per entity.
 pub fn rollBlockAttackDelay(w: *World, s: Slot) f32 {
     const r = rngFrac(&w.zombie_ai[s], w.network_id[s].id);
     return 0.25 + r * 0.8 + 0.75;
@@ -1848,8 +1848,8 @@ pub fn systemZombieAi(w: *World, dt: f32) u32 {
     tickItemDistractions(w);
     var scan: PlayerScan = .{};
     _ = snapshotPlayers(w, &scan, true);
-    var dmg_fp: [max_entities]u32 = .{0} ** max_entities;
-    var dmg_attacker: [max_entities]u16 = .{std.math.maxInt(Slot)} ** max_entities;
+    var dmg_fp: [max_entities]u32 = @splat(0);
+    var dmg_attacker: [max_entities]u16 = @splat(std.math.maxInt(Slot));
     var hits_a: std.atomic.Value(u32) = .init(0);
     // The vomit projectile is per-shooter sim state (stock's is a client
     // GameObject, never a replicated entity): step it serially before the

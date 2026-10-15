@@ -34,9 +34,9 @@ pub const StockEntry = struct {
 };
 
 pub const UserRef = struct {
-    platform: [max_platform_len]u8 = .{0} ** max_platform_len,
+    platform: [max_platform_len]u8 = @splat(0),
     platform_len: u8 = 0,
-    id: [max_id_len]u8 = .{0} ** max_id_len,
+    id: [max_id_len]u8 = @splat(0),
     id_len: u8 = 0,
 
     /// Copy an identity in (rent sets the owner). Overlong strings are
@@ -68,13 +68,13 @@ pub const Vending = struct {
     /// TraderID from blocks.xml (TraderData.TraderID; resolves trader_info).
     trader_id: i32 = 0,
     available_money: i32 = 0,
-    stock: [max_vending_stock]StockEntry = [_]StockEntry{.{}} ** max_vending_stock,
+    stock: [max_vending_stock]StockEntry = @splat(.{}),
     stock_n: u8 = 0,
     is_locked: bool = false,
     owner: UserRef = .{},
-    password_hash: [max_password_hash]u8 = .{0} ** max_password_hash,
+    password_hash: [max_password_hash]u8 = @splat(0),
     password_len: u8 = 0,
-    allowed: [max_allowed_users]UserRef = [_]UserRef{.{}} ** max_allowed_users,
+    allowed: [max_allowed_users]UserRef = @splat(.{}),
     allowed_n: u8 = 0,
     /// In-game day the rental expires (0 = not rented; ClearVendingMachine on
     /// currentDay > rental_end_day).
@@ -109,8 +109,8 @@ pub const Vending = struct {
 
 /// Fixed-cap array store, embedded in Game (no heap on the tick path).
 pub const VendingStore = struct {
-    items: [max_vending]Vending = [_]Vending{.{}} ** max_vending,
-    used: [max_vending]bool = [_]bool{false} ** max_vending,
+    items: [max_vending]Vending = @splat(.{}),
+    used: [max_vending]bool = @splat(false),
 
     pub fn count(self: *const VendingStore) usize {
         var n: usize = 0;

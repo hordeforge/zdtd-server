@@ -133,7 +133,7 @@ test "persistent player state fits a full claim list at max identity length" {
     // drawn. Both identity strings and the name are at their caps, with both
     // lists full, which is the largest body the join path can produce.
     var buf: [persistent_player_state_max_len]u8 = undefined;
-    const long_id = "0123456789" ** 6 ++ "0123"; // 64 = platform_user.max_id_len
+    const long_id = @import("../util/root.zig").repeat("0123456789", 6) ++ "0123"; // 64 = platform_user.max_id_len
     const long_platform = "0123456789abcdef"; // 16 = platform_user.max_platform_len
     const primary: platform_user.Id = .{ .platform = long_platform, .id = long_id };
     var lp: [max_lp_blocks_on_wire][3]i32 = undefined;

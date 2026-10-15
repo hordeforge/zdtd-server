@@ -497,14 +497,21 @@ test "horde bonus loot scales every Nth spawn and marks the row" {
     // death path then reads the stored probability verbatim. Seeded at half
     // cadence by InitParty (IL_0072-0080).
     var w: ecs_world.World = .{};
-    _ = w.spawnPlayer(0, 70, 0, 0);
+    // Clear of the forced spawn points below: the anti-stacking gate and the
+    // view cone both refuse a point any player stands in or faces, so the
+    // player anchors far away and faces away from the spawns.
+    const hero = w.spawnPlayer(200, 70, 200, 0).?;
+    w.transform[w.slotOfNetId(hero).?].yaw = 180;
+    w.class_id[w.slotOfNetId(hero).?].view_angle_deg = 60;
     var dir: Director = .{};
     dir.setBloodMoonBonus(4, 25);
     try std.testing.expectEqual(@as(u32, 2), dir.bm_bonus_count); // seeded at every/2
     var bonus_n: u32 = 0;
     var i: u32 = 0;
     while (i < 2) : (i += 1) {
-        const slot = dir.spawnOneZombieLoot(&w, 0, 70, 0, "", i, true, .bloodmoon) orelse return error.TestUnexpectedResult;
+        // The point refuses (occupancy / view cone) when it sits on a body,
+        // so the two forced spawns are spaced; a refused point fails the pin.
+        const slot = dir.spawnOneZombieLoot(&w, 240 + 4 * @as(f32, @floatFromInt(i)), 70, 240, "", i, true, .bloodmoon) orelse return error.TestUnexpectedResult;
         if (w.class_id[slot].bonus_loot) {
             bonus_n += 1;
             try std.testing.expectEqual(@as(f32, 25.0), w.class_id[slot].drop_prob);
@@ -516,7 +523,7 @@ test "horde bonus loot scales every Nth spawn and marks the row" {
     var wbonus: u32 = 0;
     i = 0;
     while (i < 3) : (i += 1) {
-        const slot = dir.spawnOneZombieLoot(&w, 0, 70, 0, "", 100 + i, true, .wandering) orelse return error.TestUnexpectedResult;
+        const slot = dir.spawnOneZombieLoot(&w, 248 + 4 * @as(f32, @floatFromInt(i)), 70, 240, "", 100 + i, true, .wandering) orelse return error.TestUnexpectedResult;
         if (w.class_id[slot].bonus_loot) {
             wbonus += 1;
             try std.testing.expectEqual(@as(f32, 15.0), w.class_id[slot].drop_prob);
@@ -1128,7 +1135,10 @@ test "ambient rule budget caps the drip and releases on destroy" {
     defer w.deinit();
     // The budget lives on the World's own director so World.destroy's release
     // finds it (the game drives w.director.tick the same way).
-    w.director.clock = .{ .day = 1, .hours = 23.0 };
+    // A fixed rule resolver: index 3, maxcount 2, respawn 1 day. The clock
+    // runs at stock rate (6 ticks/s): the fast test clock advances a whole
+    // day inside the drip loop, which rolls the budget reset it pins.
+    w.director.clock = .{ .day = 1, .hours = 23.0, .time_of_day_inc_per_sec = 6 };
     w.director.max_alive = 64;
     // A fixed rule resolver: index 3, maxcount 2, respawn 1 day.
     const Ctx = struct {
@@ -1146,7 +1156,17 @@ test "ambient rule budget caps the drip and releases on destroy" {
     var ticks: u32 = 0;
     while (ticks < 40 and w.countKind(.zombie) < 2) : (ticks += 1) _ = w.director.tick(&w, 0.05);
     try std.testing.expectEqual(@as(u32, 2), w.countKind(.zombie));
-    try std.testing.expectEqual(@as(u8, 2), w.director.rule_budgets[3].count);
+    // The drip charges one district: both spawns land in one 80-block cell,
+    // so summing the district grid reports exactly the rule's live count.
+    var charged: u32 = 0;
+    var cx: i32 = -160;
+    while (cx <= 160) : (cx += 80) {
+        var cz: i32 = -160;
+        while (cz <= 160) : (cz += 80) {
+            charged += w.director.budgetAlive(3, aidirector.districtKey(@floatFromInt(cx), @floatFromInt(cz)));
+        }
+    }
+    try std.testing.expectEqual(@as(u32, 2), charged);
 
     // The delay is armed: further drip ticks cannot add to the rule.
     const before = w.countKind(.zombie);
@@ -1164,8 +1184,17 @@ test "ambient rule budget caps the drip and releases on destroy" {
         }
     }
     try std.testing.expect(found != null);
-    w.destroy(found.?);
-    try std.testing.expectEqual(@as(u8, 1), w.director.rule_budgets[3].count);
+    const victim = found.?;
+    w.destroy(victim);
+    var after: u32 = 0;
+    cx = -160;
+    while (cx <= 160) : (cx += 80) {
+        var cz2: i32 = -160;
+        while (cz2 <= 160) : (cz2 += 80) {
+            after += w.director.budgetAlive(3, aidirector.districtKey(@floatFromInt(cx), @floatFromInt(cz2)));
+        }
+    }
+    try std.testing.expectEqual(@as(u32, 1), after);
     // The drip re-runs when horde_cd (45 s) elapses (900 ticks at 0.05); the
     // budget admits the slot freed by the kill within the same cycle.
     for (0..950) |_| _ = w.director.tick(&w, 0.05);
@@ -1180,12 +1209,39 @@ test "rule budgets cover the full parsed table, not just the first 64" {
     var w: ecs_world.World = .{};
     defer w.deinit();
     const b: RuleBudget = .{ .index = 511, .maxcount = 1, .respawn_days = 1.0 };
-    try std.testing.expect(w.director.budgetAllows(b, &w));
-    w.director.budgetConsume(b, &w);
-    try std.testing.expectEqual(@as(u8, 1), w.director.rule_budgets[511].count);
-    try std.testing.expect(!w.director.budgetAllows(b, &w));
-    w.director.releaseRule(511);
-    try std.testing.expect(w.director.budgetAllows(b, &w));
+    try std.testing.expect(w.director.budgetAllows(b, &w, 0, 0));
+    w.director.budgetConsume(b, &w, 0, 0);
+    try std.testing.expectEqual(@as(u32, 1), w.director.budgetAlive(511, aidirector.districtKey(0, 0)));
+    try std.testing.expect(!w.director.budgetAllows(b, &w, 0, 0));
+    w.director.releaseRule(511, 0, 0, 0, false);
+    try std.testing.expect(w.director.budgetAllows(b, &w, 0, 0));
+}
+
+test "spawn budget is per district and a kill thins only that district" {
+    // Stock counts per 5x5-chunk district (spawning.md §3): a full district
+    // does not block the same rule 80 blocks away, and a kill lowers the cap
+    // only where it happened.
+    var w: ecs_world.World = .{};
+    defer w.deinit();
+    const b: RuleBudget = .{ .index = 4, .maxcount = 2, .respawn_days = 1.0 };
+    w.director.budgetConsume(b, &w, 0, 0);
+    w.director.budgetConsume(b, &w, 0, 0);
+    try std.testing.expect(!w.director.budgetAllows(b, &w, 10, 10));
+    // 200 blocks east is a different district: its own full cap.
+    try std.testing.expect(w.director.budgetAllows(b, &w, 200, 0));
+    // A kill at the origin frees the slot and lowers the cap to 1, so the
+    // remaining live spawn still fills it.
+    w.director.releaseRule(4, 0, 0, 0, true);
+    try std.testing.expect(!w.director.budgetAllows(b, &w, 0, 0));
+    try std.testing.expectEqual(@as(u8, 1), w.director.budgetCap(4, 0, 0));
+    // The far district is untouched.
+    try std.testing.expect(w.director.budgetAllows(b, &w, 200, 0));
+    // A release keyed by the spawn district frees that district even when the
+    // body is reported somewhere else: stock keys the spawner's chunk.
+    w.director.budgetConsume(b, &w, 200, 0);
+    const far = aidirector.districtKey(200, 0);
+    w.director.releaseRule(4, far, 0, 0, false);
+    try std.testing.expect(w.director.budgetAllows(b, &w, 200, 0));
 }
 
 test "difficulty damage scale uses the comptime XML ladder" {
@@ -1255,6 +1311,40 @@ test "a spawn whose ground forbids mobs is refused" {
     try std.testing.expect(d2.spawnOneZombieLoot(&w, 12.0, 70.0, 12.0, "", 9, false, .none) != null);
 }
 
+test "a spawn in a player's view cone is refused" {
+    // Stock drops a biome spawn any player within 50 m can see
+    // (GetRandomSpawnPositionInArea, IsInViewCone IL=40).
+    var w: ecs_world.World = .{};
+    defer w.deinit();
+    const id = w.spawnPlayer(0, 70, 0, 0).?;
+    const s = w.slotOfNetId(id).?;
+    // Facing +Z (yaw 0, forward (0, 1)); full cone 180 so half is 90.
+    w.transform[s].yaw = 0;
+    w.class_id[s].view_angle_deg = 180;
+    // Straight ahead, inside 50 m: seen.
+    try std.testing.expect(Director.spawnInPlayerView(&w, 0, 20));
+    // Straight behind: outside the half-angle.
+    try std.testing.expect(!Director.spawnInPlayerView(&w, 0, -20));
+    // Ahead but past 50 m: the cone does not reach.
+    try std.testing.expect(!Director.spawnInPlayerView(&w, 0, 60));
+}
+
+test "a spawn on top of an existing entity is refused" {
+    // Stock aborts the biome spawn when GetEntitiesInBounds finds anything in
+    // the 4 x 2.5 x 4 box around the chosen position (spawning.md IL_03f8).
+    var w: ecs_world.World = .{};
+    defer w.deinit();
+    var d: Director = .{ .clock = .{ .time_of_day_inc_per_sec = 1000 } };
+    try std.testing.expect(d.spawnOneZombieLoot(&w, 10.0, 70.0, 10.0, "", 7, false, .none) != null);
+    // Same cell: the first zombie fills the box.
+    try std.testing.expect(d.spawnOneZombieLoot(&w, 10.5, 70.0, 10.5, "", 8, false, .none) == null);
+    // Two blocks clear of the box edge (half-extent 2): allowed.
+    try std.testing.expect(d.spawnOneZombieLoot(&w, 14.0, 70.0, 10.0, "", 9, false, .none) != null);
+    // A player occupies the box too.
+    _ = w.spawnPlayer(20.0, 70.0, 20.0, 0).?;
+    try std.testing.expect(d.spawnOneZombieLoot(&w, 21.0, 70.5, 20.0, "", 11, false, .none) == null);
+}
+
 test "a blood-moon spawn swaps in the radiated vulture for a riding target" {
     // Stock AIDirectorBloodMoonParty::SpawnZombie IL_0031-0061: when the
     // targeted player is attached to an entity (a vehicle), a 50% roll picks
@@ -1292,7 +1382,7 @@ test "a blood-moon spawn swaps in the radiated vulture for a riding target" {
     dir.class_resolve_fn = &Resolver.resolve;
     dir.setBloodMoonBonus(4, 25);
     const before_bonus = dir.bm_bonus_count;
-    const slot = dir.spawnOneZombieClass(&w, 0, 70, 0, "", 7, true, .none, "animalZombieVultureRadiated") orelse return error.TestUnexpectedResult;
+    const slot = dir.spawnOneZombieClass(&w, 20, 70, 20, "", 7, true, .none, "animalZombieVultureRadiated") orelse return error.TestUnexpectedResult;
     try std.testing.expect(w.mask[slot].class_id);
     try std.testing.expectEqual(@as(i32, 909090), w.class_id[slot].hash);
     try std.testing.expect(!w.class_id[slot].bonus_loot);

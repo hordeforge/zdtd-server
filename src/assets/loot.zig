@@ -335,7 +335,7 @@ pub const LootGroup = struct {
     /// `AbundanceLootModTypes` category whose sandbox count modifier scales this
     /// group's counts (RE loot-economy.md 8.3, `LoadLootGroup` parses it).
     abundance_type: []const u8 = "",
-    entries: [max_entries]LootEntry = [_]LootEntry{.{}} ** max_entries,
+    entries: [max_entries]LootEntry = @splat(.{}),
     entry_n: u8 = 0,
 };
 
@@ -372,7 +372,7 @@ pub const LootContainer = struct {
     /// containers carry it (268 one, 33 zero, one "1,2").
     pick_min: u16 = 1,
     pick_max: u16 = 1,
-    entries: [max_entries]LootEntry = [_]LootEntry{.{}} ** max_entries,
+    entries: [max_entries]LootEntry = @splat(.{}),
     entry_n: u8 = 0,
 };
 

@@ -1383,7 +1383,7 @@ const cli_flag_corpus = [_][]const u8{
     "27002",
     "--",
     "----",
-    "--port=" ++ ("9" ** 40),
+    "--port=" ++ @import("util/root.zig").repeat("9", 40),
     "\x00--help",
     "--webui-secret=s3cr3t",
 };
@@ -1469,6 +1469,6 @@ test "integration world persist + damage + packages" {
     try std.testing.expectEqual(@as(i32, 22), std.mem.readInt(i32, fr[9..][0..4], .little));
 
     var ch: [17]u8 = undefined;
-    frame.buildChallenge(&ch, .{1} ** 16);
+    frame.buildChallenge(&ch, @splat(1));
     try std.testing.expect(frame.isChallenge(&ch));
 }

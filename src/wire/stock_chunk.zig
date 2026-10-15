@@ -211,7 +211,7 @@ pub fn layerCell(lx: i32, y_in_layer: i32, lz: i32) usize {
 /// by value; ties fall to the first maximum). `fallback` seeds the dominant and
 /// wins only when no cell count exceeds zero (an all-0 cell grid is dominant 0).
 pub fn dominantOf(biomes: *const [256]u8, fallback: u8) u8 {
-    var counts: [256]u16 = .{0} ** 256;
+    var counts: [256]u16 = @splat(0);
     for (biomes) |b| counts[b] +|= 1;
     var dom = fallback;
     var best: u16 = 0;
@@ -598,11 +598,11 @@ pub fn encodeNetworkChunk(buf: []u8, opts: EncodeOpts) ![]u8 {
     // fresh-world all-clear (stock default). RE Chunk.SetTopSoilBroken
     // IL=36 (world-chunks.md); the all-0xFF workaround is gone (it made
     // every column render block textures, never the stock splat look).
-    const topsoil = opts.topsoil orelse &[_]u8{0} ** 32;
+    const topsoil = opts.topsoil orelse &@as([32]u8, @splat(0));
     try w.writeBytes(topsoil);
 
     // biomes 256
-    var biomes: [256]u8 = .{opts.biome} ** 256;
+    var biomes: [256]u8 = @splat(opts.biome);
     // Per-cell biome provider (biomes.png / proc): smooths biome transitions
     // to the cell instead of snapping to the chunk dominant. Fallback keeps
     // the uniform dominant value.
@@ -622,7 +622,7 @@ pub fn encodeNetworkChunk(buf: []u8, opts: EncodeOpts) ![]u8 {
     // biome intensities: 1536 bytes = BiomeIntensity[256], 6 bytes each interleaved:
     // biomeId0..3, intensity0and1 (lo nibble=i0), intensity2and3
     // Default stock full single-biome: id0=biome, intensity0and1=0x0F (i0=1).
-    var intensities: [1536]u8 = .{0} ** 1536;
+    var intensities: [1536]u8 = @splat(0);
     var i: usize = 0;
     while (i < 256) : (i += 1) {
         const o = i * 6;
@@ -641,9 +641,9 @@ pub fn encodeNetworkChunk(buf: []u8, opts: EncodeOpts) ![]u8 {
     try w.writeU16(0);
 
     // Terrain normals as sbyte * 127 (Chunk.SetTerrainNormal). Flat = (0,1,0).
-    var nx: [256]u8 = .{0} ** 256;
-    var ny: [256]u8 = .{127} ** 256;
-    var nz: [256]u8 = .{0} ** 256;
+    var nx: [256]u8 = @splat(0);
+    var ny: [256]u8 = @splat(127);
+    var nz: [256]u8 = @splat(0);
     try w.writeBytes(&nx);
     try w.writeBytes(&ny);
     try w.writeBytes(&nz);
@@ -807,7 +807,7 @@ fn writeWaterChannel(w: *binary.Writer, opts: EncodeOpts) !void {
     var band: usize = 0;
     while (band < opts.layers) : (band += 1) {
         const y0: i32 = @intCast(band * 4);
-        var vals: [cells_per_layer]u16 = .{0} ** cells_per_layer;
+        var vals: [cells_per_layer]u16 = @splat(0);
         var has_water = false;
         if (opts.water_block_id != 0) {
             if (opts.raws) |plane| {
@@ -855,7 +855,7 @@ fn writeDamageChannel(w: *binary.Writer, opts: EncodeOpts) !void {
     var band: usize = 0;
     while (band < opts.layers) : (band += 1) {
         const y0: i32 = @intCast(band * 4);
-        var vals: [cells_per_layer]u16 = .{0} ** cells_per_layer;
+        var vals: [cells_per_layer]u16 = @splat(0);
         var has_dmg = false;
         var ly: i32 = 0;
         while (ly < 4) : (ly += 1) {

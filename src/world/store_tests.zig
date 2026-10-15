@@ -371,7 +371,7 @@ test "topsoil bitfield: fresh clear, dig marks, ZCH3 round-trips" {
     // Pre-topsoil save (16-byte hdr + heights only): loads all-clear.
     var path_buf2: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const path2 = try std.fmt.bufPrint(&path_buf2, "{s}/c_0_0.zch", .{dir});
-    var old: [16 + 256]u8 = .{0} ** (16 + 256);
+    var old: [16 + 256]u8 = @splat(0);
     old[0] = 'Z';
     old[1] = 'C';
     old[2] = 'H';
@@ -392,7 +392,7 @@ test "torn or misplaced chunk save cannot partially replace generated state" {
     var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const path = try std.fmt.bufPrint(&path_buf, "{s}/c_0_0.zch", .{dir});
 
-    var torn: [16 + 256]u8 = .{0} ** (16 + 256);
+    var torn: [16 + 256]u8 = @splat(0);
     @memcpy(torn[0..4], "ZCH3");
     torn[12] = 1; // Claims a block plane that is not present.
     @memset(torn[16..], 200);
@@ -638,7 +638,7 @@ test "water sources fill lake columns with water blocks" {
     // fill 61..70; air above; far columns outside radius stay dry. A shore cell
     // with bed at 71 (above the surface) keeps terrain, no water.
     var chunk: Chunk = .{ .pos = .{ .x = 0, .z = 0 } };
-    chunk.heights = .{60} ** 256;
+    chunk.heights = @splat(60);
     chunk.heights[0] = 71; // shore cell at (0,0): bed above the water surface
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -1202,7 +1202,7 @@ test "nextNonAir matches a scalar walk" {
         }
     }
     // All-air and empty inputs terminate without a hit.
-    var air: [256]u32 = .{0} ** 256;
+    var air: [256]u32 = @splat(0);
     try std.testing.expectEqual(@as(?usize, null), store.nextNonAir(&air, 0));
     air[255] = 9;
     try std.testing.expectEqual(@as(?usize, 255), store.nextNonAir(&air, 0));

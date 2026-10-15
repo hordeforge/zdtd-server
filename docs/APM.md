@@ -52,7 +52,8 @@ flowchart LR
 `stream_errors`, `tick_overruns`, `encode_errors`,
 `phase_rejects`, `ownership_rejects`, `bounds_rejects`, `movement_rejects`,
 `decode_rejects`, `reconnects`, `buff_rejects`, `inv_ledger_events`,
-`c2s_throttle`, `c2s_malformed`, `c2s_rejects`, `c2s_unhandled`,
+`c2s_throttle`, `c2s_malformed`, `c2s_rejects`, `c2s_unhandled`, `c2s_noop`
+(stock-ignored packages: Debug, DynamicMesh),
 `c2s_version_rejects`, `c2s_stock_invtx`, `c2s_te_sign_echo`,
 `evidence_events`, `guard_quarantines`, `guard_kicks`, `guard_would_kicks`,
 `quarantine_rejects`, `load_shed_drops`, `hard_ceiling_downgrades` (T20:

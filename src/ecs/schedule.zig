@@ -32,28 +32,28 @@ pub const TickResult = struct {
     director_spawned: u32 = 0,
     world_time: u64 = 0,
     turret_kills: u32 = 0,
-    killed_ids: [16]i32 = .{0} ** 16,
+    killed_ids: [16]i32 = @splat(0),
     killed_n: u8 = 0,
     /// Owner client slot per turret kill (parallel to killed_ids).
-    owner_slots: [16]i16 = .{-1} ** 16,
-    loot_bag_ids: [16]i32 = .{0} ** 16,
+    owner_slots: [16]i16 = @splat(-1),
+    loot_bag_ids: [16]i32 = @splat(0),
     loot_n: u8 = 0,
-    despawned_ids: [8]i32 = .{0} ** 8,
+    despawned_ids: [8]i32 = @splat(0),
     /// Slot each despawned mob held when it was destroyed, parallel to
     /// `despawned_ids`. The net layer scopes the EntityRemove by it; the id
     /// no longer resolves once the sweep has destroyed the entity.
-    despawned_slots: [8]u16 = .{0} ** 8,
+    despawned_slots: [8]u16 = @splat(0),
     despawned_n: u8 = 0,
     /// Entities the plugin `despawn` verb destroyed this tick, reported
     /// separately from the far-despawn sweep above because they come from the
     /// command drain rather than a system. Same contract: the net layer owes
     /// each one an EntityRemove scoped by the pre-destroy slot.
-    cmd_despawned_ids: [command.max_commands]i32 = .{0} ** command.max_commands,
-    cmd_despawned_slots: [command.max_commands]u32 = .{0} ** command.max_commands,
+    cmd_despawned_ids: [command.max_commands]i32 = @splat(0),
+    cmd_despawned_slots: [command.max_commands]u32 = @splat(0),
     cmd_despawned_n: u32 = 0,
     /// Buffs that ended this tick; the net layer relays each as an
     /// AddRemoveBuff with adding=false so observers drop the icon.
-    buff_expired: [16]buff.Expiry = [_]buff.Expiry{.{}} ** 16,
+    buff_expired: [16]buff.Expiry = @splat(.{}),
     buff_expired_n: u8 = 0,
     commands_applied: u32 = 0,
     /// A* replans this tick. Evidence for the deferred path-solve phase gap
@@ -88,7 +88,7 @@ pub fn run(w: *World, dt: f32) TickResult {
     w.beginTick();
     const on = w.rules.systems;
 
-    var buff_expired: [16]buff.Expiry = [_]buff.Expiry{.{}} ** 16;
+    var buff_expired: [16]buff.Expiry = @splat(.{});
     const buff_n = if (on.buffs) systems.systemBuffs(w, buff_expired[0..]) else 0;
 
     // Always run: the director owns the world clock and the daily restock, so
@@ -109,8 +109,8 @@ pub fn run(w: *World, dt: f32) TickResult {
     // turrets read solar as powered at night. Turrets use last tick's resolve.
     const tk = if (on.turrets) systems.systemTurrets(w, dt) else systems.TurretTick{};
 
-    var de_ids: [8]i32 = .{0} ** 8;
-    var de_slots: [8]u16 = .{0} ** 8;
+    var de_ids: [8]i32 = @splat(0);
+    var de_slots: [8]u16 = @splat(0);
     const de_n = if (on.despawn) systems.systemDespawnFar(w, de_ids[0..], de_slots[0..]) else 0;
 
     // Deferred ops from systems/plugins: apply after sim mutations settle.

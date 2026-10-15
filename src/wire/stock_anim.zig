@@ -333,7 +333,7 @@ test "variable-length relay bodies report where the stock body ends" {
     const snd = try buildSoundAtPosition(&buf, .{
         .pos = .{ 1, 2, 3 },
         .clip = blk: {
-            var c: [max_audio_clip_len]u8 = .{0} ** max_audio_clip_len;
+            var c: [max_audio_clip_len]u8 = @splat(0);
             @memcpy(c[0..4], "boom");
             break :blk c;
         },

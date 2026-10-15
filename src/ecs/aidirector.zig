@@ -10,6 +10,11 @@ const ecs_world = @import("world.zig");
 /// instead of one tick spawning the whole population.
 const initial_population_batch: u32 = 4;
 
+/// Placement retries per wanted spawn. Stock re-rolls a refused point
+/// (occupied box, view cone) instead of losing the tick; a fixed bearing made
+/// that refusal permanent. Bounded so a hostile ring cannot spin.
+const placement_retry_limit: u32 = 16;
+
 /// In-game ticks per day (DayTimeToWorldTime: 24000 ticks, 1000 per hour).
 pub const ticks_per_day: u64 = 24000;
 
@@ -305,11 +310,39 @@ pub const RuleBudget = struct {
     respawn_days: f32 = 1.0,
 };
 
-/// Per-rule runtime state (spawned-alive count + next respawn world time).
-pub const RuleBudgetState = struct {
+/// One district's budget for one rule. Stock keeps this per 5x5-chunk
+/// district (`toChunkXZ / 5`, an 80-block cell, spawning.md §3), so the same
+/// rule refills independently wherever the player is. The drip only touches
+/// the ring around live players, so a short list per rule covers it; a rule
+/// whose list is full falls back to one shared counter.
+pub const max_budget_districts: usize = 8;
+
+pub const DistrictBudget = struct {
+    /// Packed district: `(dx + 32768) << 16 | (dz + 32768)`. 0 = empty slot.
+    key: u32 = 0,
     count: u8 = 0,
+    /// Kills lower the cap until the respawn delay elapses (DecCount
+    /// killed=true, spawning.md §3). 0 = the rule's own maxcount.
+    max_count: u8 = 0,
     next_respawn_wt: u64 = 0,
 };
+
+/// Per-rule runtime state.
+pub const RuleBudgetState = struct {
+    districts: [max_budget_districts]DistrictBudget = @splat(.{}),
+    fallback: DistrictBudget = .{},
+};
+
+/// District key for a world position: the 5x5-chunk cell (`toChunkXZ / 5`).
+/// 0 is the empty-slot sentinel, so the origin district maps to 1.
+pub fn districtKey(x: f32, z: f32) u32 {
+    const cx = @divFloor(@as(i32, @floor(x)), 16);
+    const cz = @divFloor(@as(i32, @floor(z)), 16);
+    const dx: u32 = @intCast(@as(i32, @divFloor(cx, 5)) + 32768);
+    const dz: u32 = @intCast(@as(i32, @divFloor(cz, 5)) + 32768);
+    const k = (dx << 16) | (dz & 0xffff);
+    return if (k == 0) 1 else k;
+}
 
 pub const Director = struct {
     /// Spawn-group kind for per-biome resolution (spawning.xml rule kind).
@@ -321,7 +354,7 @@ pub const Director = struct {
     heat_sensitivity: f32 = 1.0,
     /// Ambient spawn rule budgets, keyed by the spawning.xml rule index. The
     /// array is fixed-size; indices beyond it are treated as unbudgeted.
-    rule_budgets: [rule_budget_cap]RuleBudgetState = [_]RuleBudgetState{.{}} ** rule_budget_cap,
+    rule_budgets: [rule_budget_cap]RuleBudgetState = @splat(.{}),
     /// Optional per-spawn-point rule resolver: (ctx, x, z, kind) -> budget.
     /// Game wires the spawning.xml table; null = unbudgeted ambient spawns.
     rule_budget_ctx: ?*anyopaque = null,
@@ -416,7 +449,7 @@ pub const Director = struct {
     /// players within cPartyJoinDistance 80 m share one focus and one
     /// per-party wave; the party gamestage is frozen for the night; horde
     /// zombies beyond cTeleportDist 150 m are teleported back.
-    bm_parties: [bm_parties_cap]BmParty = [_]BmParty{.{}} ** bm_parties_cap,
+    bm_parties: [bm_parties_cap]BmParty = @splat(.{}),
     bm_party_n: u8 = 0,
     /// Party gamestage snapshot at dusk (stock InitParty freezes it).
     bm_stage_frozen: i32 = 0,
@@ -458,7 +491,7 @@ pub const Director = struct {
     /// ChooseNextTime: now + RandomRange(12000, 24000); player-gated.
     wandering_next: u64 = 0,
     /// Heat map regions (AIDirectorChunkData), dense array capped.
-    heat: [max_heat_regions]HeatRegion = [_]HeatRegion{.{}} ** max_heat_regions,
+    heat: [max_heat_regions]HeatRegion = @splat(.{}),
     heat_n: u8 = 0,
     heat_check_cd: f32 = 0,
     /// Alive-zombie ceiling (MaxSpawnedZombies). Defaults to the dev cap; the
@@ -751,62 +784,77 @@ pub const Director = struct {
 
     fn spawnAnimalsNearPlayers(self: *Director, w: *ecs_world.World, count: u32, min_r: f32, max_r: f32) u32 {
         var n: u32 = 0;
+        // Stock retries a refused point with a fresh roll rather than losing
+        // the tick (spawning.md section 2). A fixed bearing per spawn counter
+        // made refusals permanent: the same point kept being picked, so one
+        // occupied cell stopped the animal drip for good. The retry bound
+        // keeps a refused point from spinning.
+        var attempts: u32 = 0;
         for (w.kind_groups.slice(.player)) |p| {
             if (n >= count) break;
             if (!w.alive[p] or !w.mask[p].player or !w.mask[p].transform) continue;
-            const ang = @as(f32, @floatFromInt(self.total_spawned +% n)) * 2.3;
-            const r = min_r + (max_r - min_r) * @mod(ang, 1.0);
-            const x = w.transform[p].x + @cos(ang) * r;
-            const z = w.transform[p].z + @sin(ang) * r;
-            // Per-rule budget gate for the animal rules (maxcount/respawndelay).
-            const budget = self.budgetFor(w, x, z, .animal);
-            if (budget.index != 0xffff and !self.budgetAllows(budget, w)) continue;
-            const y = w.groundY(x, z) orelse w.transform[p].y;
-            // Wildlife group per player biome (fallback = the single group).
-            var animal_ct: ?ecs_world.EntityClass = null;
-            var agroup = self.animal_group;
-            if (self.biome_group_fn) |bf| agroup = bf(self.biome_group_ctx, x, z, .animal, self.animal_group);
-            if (agroup.len > 0) {
-                if (self.group_pick_fn) |pick| {
-                    if (pick(self.group_pick_ctx, agroup, self.total_spawned)) |cname| {
-                        for (w.class_table) |ct| {
-                            if (ct.kind == .animal and std.mem.eql(u8, ct.name, cname)) {
-                                animal_ct = ct;
-                                break;
+            var placed = false;
+            while (!placed and attempts < placement_retry_limit) : (attempts += 1) {
+                const ang = @as(f32, @floatFromInt(self.total_spawned +% n +% attempts)) * 2.3;
+                const r = min_r + (max_r - min_r) * @mod(ang, 1.0);
+                const x = w.transform[p].x + @cos(ang) * r;
+                const z = w.transform[p].z + @sin(ang) * r;
+                // Per-rule budget gate for the animal rules (maxcount/respawndelay).
+                const budget = self.budgetFor(w, x, z, .animal);
+                // A refused budget ends this batch: the drip is one animal per
+                // interval and the rule is already at its cap.
+                if (budget.index != 0xffff and !self.budgetAllows(budget, w, x, z)) break;
+                const y = w.groundY(x, z) orelse w.transform[p].y;
+                if (spawnBoxOccupied(w, x, y, z)) continue;
+                if (spawnInPlayerView(w, x, z)) continue;
+                // Wildlife group per player biome (fallback = the single group).
+                var animal_ct: ?ecs_world.EntityClass = null;
+                var agroup = self.animal_group;
+                if (self.biome_group_fn) |bf| agroup = bf(self.biome_group_ctx, x, z, .animal, self.animal_group);
+                if (agroup.len > 0) {
+                    if (self.group_pick_fn) |pick| {
+                        if (pick(self.group_pick_ctx, agroup, self.total_spawned)) |cname| {
+                            for (w.class_table) |ct| {
+                                if (ct.kind == .animal and std.mem.eql(u8, ct.name, cname)) {
+                                    animal_ct = ct;
+                                    break;
+                                }
+                            }
+                            // Full entityclasses stats when the animal class was not
+                            // preloaded into the fixed table (same A35 path as
+                            // zombies: bear 2500 HP instead of the 30 floor).
+                            if (animal_ct == null) {
+                                if (self.class_resolve_fn) |f| animal_ct = f(self.class_resolve_ctx, cname);
                             }
                         }
-                        // Full entityclasses stats when the animal class was not
-                        // preloaded into the fixed table (same A35 path as
-                        // zombies: bear 2500 HP instead of the 30 floor).
-                        if (animal_ct == null) {
-                            if (self.class_resolve_fn) |f| animal_ct = f(self.class_resolve_ctx, cname);
+                    }
+                }
+                if (animal_ct == null) {
+                    for (w.class_table) |ct| {
+                        if (ct.kind == .animal and ct.hash != 0) {
+                            animal_ct = ct;
+                            break;
                         }
                     }
                 }
-            }
-            if (animal_ct == null) {
-                for (w.class_table) |ct| {
-                    if (ct.kind == .animal and ct.hash != 0) {
-                        animal_ct = ct;
-                        break;
+                const hp: f32 = if (animal_ct) |ct| ct.max_hp else 30;
+                // spawnAnimalDef carries the resolved per-class speeds/damage onto
+                // the entity (A35), same contract as spawnZombieDef.
+                const id = if (animal_ct) |ct|
+                    w.spawnAnimalDef(x, y, z, ct)
+                else
+                    w.spawnAnimal(x, y, z, hp, 0, "");
+                const nid = id orelse break;
+                if (w.slotOfNetId(nid)) |slot| {
+                    w.zombie_ai[slot].state = .wander; // wildlife roams, does not hunt
+                    if (budget.index != 0xffff) {
+                        w.zombie_ai[slot].spawn_rule = budget.index;
+                        w.zombie_ai[slot].spawn_district = districtKey(x, z);
+                        self.budgetConsume(budget, w, x, z);
                     }
+                    n += 1;
+                    placed = true;
                 }
-            }
-            const hp: f32 = if (animal_ct) |ct| ct.max_hp else 30;
-            // spawnAnimalDef carries the resolved per-class speeds/damage onto
-            // the entity (A35), same contract as spawnZombieDef.
-            const id = if (animal_ct) |ct|
-                w.spawnAnimalDef(x, y, z, ct)
-            else
-                w.spawnAnimal(x, y, z, hp, 0, "");
-            const nid = id orelse break;
-            if (w.slotOfNetId(nid)) |slot| {
-                w.zombie_ai[slot].state = .wander; // wildlife roams, does not hunt
-                if (budget.index != 0xffff) {
-                    w.zombie_ai[slot].spawn_rule = budget.index;
-                    self.budgetConsume(budget, w);
-                }
-                n += 1;
             }
         }
         return n;
@@ -974,21 +1022,38 @@ pub const Director = struct {
             var want: u32 = if (count == 0) 1 else count;
             var group: []const u8 = group_override;
             var k: u32 = 0;
-            while (k < want and (count == 0 or n < count)) : (k += 1) {
+            var attempts: u32 = 0;
+            while (k < want and (count == 0 or n < count) and attempts < placement_retry_limit) : (attempts += 1) {
                 // Stock AIDirector ring placement (asm.il:413135): the base
                 // bearing spreads the batch, and a per-spawn jitter (seeded
                 // from the spawn counter) keeps the pattern from repeating
                 // identically every tick - zombies stop materialising from
-                // the same bearings each wave.
-                const base = @as(f32, @floatFromInt(k + n)) * 1.7;
+                // the same bearings each wave. The retry index joins the mix
+                // so a refused point is re-rolled, not picked again.
+                const base = @as(f32, @floatFromInt(k + n +% attempts)) * 1.7;
                 const jit = @as(f32, @floatFromInt(spawnJitter(self.total_spawned +% n))) / 10000.0 * 2.0 * std.math.pi;
                 const ang = base + jit;
-                const r = min_r + (max_r - min_r) * (@mod(ang, 1.0));
+                // The retry index has to move the RADIUS too. The jitter is a
+                // whole turn at most, so `mod(ang, 1.0)` gives each retry the
+                // same radius: re-rolling an occupied or visible point then
+                // hit the same cell again, and one refusal cost the whole
+                // batch. The offset is a golden-ratio step, so consecutive
+                // retries spread instead of clustering.
+                const r = min_r + (max_r - min_r) * @mod(ang + 0.6180339887 * @as(f32, @floatFromInt(attempts)), 1.0);
                 const x = w.transform[p].x + @cos(ang) * r;
                 const z = w.transform[p].z + @sin(ang) * r;
                 // Per-rule budget gate (spawning.xml maxcount/respawndelay).
                 const budget = self.budgetFor(w, x, z, if (self.clock.isNight()) .night else .day);
-                if (budget.index != 0xffff and !self.budgetAllows(budget, w)) continue;
+                // One shared rule budget spans the whole ring, so a batch
+                // stops once the district has no capacity left instead of
+                // charging slots the rule can no longer pay for.
+                if (budget.index != 0xffff) {
+                    if (self.budgetHeadroom(budget.index, x, z) == 0) break;
+                    if (!self.budgetAllows(budget, w, x, z)) {
+                        k += 1;
+                        continue;
+                    }
+                }
                 // Ground snap (RE spawn placement): the player's transform Y is
                 // its centre, ~1.7 m above the surface, so spawning at that Y
                 // embeds zombies in hillsides or leaves them floating on
@@ -998,15 +1063,22 @@ pub const Director = struct {
                     group = self.scoutGroupAt(x, z);
                 }
                 const y = w.groundY(x, z) orelse w.transform[p].y;
-                const slot = self.spawnOneZombie(w, x, y, z, group, self.total_spawned +% n, false) orelse break;
+                if (spawnInPlayerView(w, x, z)) continue;
+                const slot = self.spawnOneZombie(w, x, y, z, group, self.total_spawned +% n, false) orelse {
+                    // A refused point (occupied box) is re-rolled, not a lost
+                    // tick; a class or slot failure gives up this batch.
+                    continue;
+                };
                 w.zombie_ai[slot].state = .chase;
                 w.zombie_ai[slot].target_id = w.network_id[p].id;
                 w.zombie_ai[slot].alert = true;
                 if (budget.index != 0xffff) {
                     w.zombie_ai[slot].spawn_rule = budget.index;
-                    self.budgetConsume(budget, w);
+                    w.zombie_ai[slot].spawn_district = districtKey(x, z);
+                    self.budgetConsume(budget, w, x, z);
                 }
                 n += 1;
+                k += 1;
             }
         }
         return n;
@@ -1020,33 +1092,122 @@ pub const Director = struct {
         return .{};
     }
 
-    /// True when the rule's alive count is under maxcount, after rolling the
-    /// budget when the respawn delay has elapsed (stock ResetRespawn sets
+    /// The district slot for `key`, or the rule-wide fallback when every slot
+    /// is taken by a different district.
+    fn districtSlot(st: *RuleBudgetState, key: u32) *DistrictBudget {
+        for (&st.districts) |*d| {
+            if (d.key == key) return d;
+        }
+        for (&st.districts) |*d| {
+            if (d.key == 0) return d;
+        }
+        return &st.fallback;
+    }
+
+    /// The slot `districtSlot` would pick for (rule, key), read-only. Only
+    /// valid for a key that has already been charged at least once: an
+    /// unclaimed key picks the first empty slot and reads as zero count.
+    fn districtSlotView(st: *const RuleBudgetState, key: u32) ?*const DistrictBudget {
+        for (&st.districts) |*d| {
+            if (d.key == key) return d;
+        }
+        if (st.fallback.key == key) return &st.fallback;
+        return null;
+    }
+
+    /// Live count charged against `rule` for the district `key`
+    /// (`districtKey` of the spawn position), across the district slots and
+    /// the fallback share. The slot layout is an internal detail, so this
+    /// sums rather than picking one; tests and diagnostics read it.
+    pub fn budgetAlive(self: *const Director, rule: u16, key: u32) u32 {
+        if (rule >= rule_budget_cap) return 0;
+        const st = &self.rule_budgets[rule];
+        var total: u32 = 0;
+        for (&st.districts) |*d| {
+            if (d.key == key) total += d.count;
+        }
+        if (st.fallback.key == key) total += st.fallback.count;
+        return total;
+    }
+
+    /// The district cap currently in force for `rule` at (x,z): the rule's
+    /// maxcount, lowered by kills until the respawn delay elapses. 0 when the
+    /// district has not been charged yet.
+    pub fn budgetCap(self: *const Director, rule: u16, x: f32, z: f32) u8 {
+        if (rule >= rule_budget_cap) return 0;
+        const d = districtSlotView(&self.rule_budgets[rule], districtKey(x, z)) orelse return 0;
+        return d.max_count;
+    }
+
+    /// Total spawn capacity left for `rule` at (x,z), summing the district
+    /// slots and the fallback share. 0 means the rule is at its cap (or the
+    /// respawn delay is armed); a nonzero value is what the drip can still
+    /// admit before the next check.
+    pub fn budgetHeadroom(self: *const Director, rule: u16, x: f32, z: f32) u32 {
+        if (rule >= rule_budget_cap) return std.math.maxInt(u32);
+        const st = &self.rule_budgets[rule];
+        const key = districtKey(x, z);
+        // Nothing charged in this district yet: the first spawn pays the cap
+        // out of an empty slot, so headroom exists even though the cap field
+        // still reads 0.
+        var charged: bool = st.fallback.key == key;
+        for (&st.districts) |*d| {
+            if (d.key != 0 and d.key == key) {
+                charged = true;
+                break;
+            }
+        }
+        if (!charged) return 1;
+        var total: u32 = 0;
+        for (&st.districts) |*d| {
+            if (d.key != key) continue;
+            const cap: u32 = if (d.max_count == 0) 0 else d.max_count;
+            total += cap -| d.count;
+        }
+        if (st.fallback.key == key) {
+            const cap: u32 = if (st.fallback.max_count == 0) 0 else st.fallback.max_count;
+            total += cap -| st.fallback.count;
+        }
+        return total;
+    }
+
+    /// True when this district's alive count is under its cap, after rolling
+    /// the budget when the respawn delay has elapsed (stock ResetRespawn sets
     /// maxCount when the delay elapses; CanSpawn = count < maxCount,
-    /// spawning.md §3). The reset happens on the check, so a fresh batch in
-    /// the same world-time window is not gated by the delay it just armed.
-    pub fn budgetAllows(self: *Director, budget: RuleBudget, w: *const ecs_world.World) bool {
+    /// spawning.md §3). The cap is the rule's maxcount minus kills in this
+    /// district. The reset happens on the check, so a fresh batch in the same
+    /// world-time window is not gated by the delay it just armed.
+    pub fn budgetAllows(self: *Director, budget: RuleBudget, w: *const ecs_world.World, x: f32, z: f32) bool {
         const i: usize = budget.index;
         if (i >= rule_budget_cap) return true;
         if (budget.maxcount == 0) return true; // 0 = unbounded (stock maxcount 0)
-        const st = &self.rule_budgets[i];
+        const d = districtSlot(&self.rule_budgets[i], districtKey(x, z));
         const wt = w.director.clock.worldTimeBits();
-        if (wt >= st.next_respawn_wt) {
-            st.count = 0;
-            st.next_respawn_wt = std.math.maxInt(u64); // re-arm on consume
+        if (d.next_respawn_wt != 0 and wt >= d.next_respawn_wt) {
+            d.count = 0;
+            d.max_count = 0; // ResetRespawn restores the thinned cap
+            d.next_respawn_wt = 0; // re-arm on consume
         }
-        return st.count < budget.maxcount;
+        const cap: u8 = if (d.max_count == 0) budget.maxcount else d.max_count;
+        return d.count < cap;
     }
 
-    /// Charge one spawn against the rule budget: increment the alive count
+    /// Charge one spawn against the district budget: increment the alive count
     /// and arm the next cycle's respawn delay on the first spawn of a cycle
     /// (stock ResetRespawn arms the delay when the budget resets).
-    pub fn budgetConsume(self: *Director, budget: RuleBudget, w: *const ecs_world.World) void {
+    pub fn budgetConsume(self: *Director, budget: RuleBudget, w: *const ecs_world.World, x: f32, z: f32) void {
         const i: usize = budget.index;
         if (i >= rule_budget_cap or budget.maxcount == 0) return;
         const st = &self.rule_budgets[i];
-        st.count +|= 1;
-        if (st.count == 1 and st.next_respawn_wt == std.math.maxInt(u64)) {
+        const key = districtKey(x, z);
+        // Claim the district's slot before charging it. Parking the key only
+        // after the increment let a recycled or never-stamped slot take the
+        // charge, so the count landed under an empty key and read as zero.
+        var d: *DistrictBudget = districtSlot(st, key);
+        if (d.key != key) d.key = key;
+        if (d.max_count == 0) d.max_count = budget.maxcount;
+        d.count +|= 1;
+        if (d.count == 1 and d.next_respawn_wt == 0) {
             // Stock scales days to world ticks (BiomeSpawningFromXml IL_0191:
             // ParseFloat * 24000) and arms delayWorldTime = now + delay *
             // RandomRange(0.9, 1.1) (ResetRespawn IL_0146-0159). The delay is
@@ -1055,16 +1216,34 @@ pub const Director = struct {
             // Deterministic midpoint (1.0x) instead of the 0.9-1.1 roll: the
             // budget has no per-rule RNG stream.
             const ticks: u64 = @trunc(@max(0, budget.respawn_days) * @as(f32, ticks_per_day));
-            st.next_respawn_wt = w.director.clock.worldTimeBits() + ticks;
+            d.next_respawn_wt = w.director.clock.worldTimeBits() + ticks;
         }
     }
 
-    /// Decrement a rule's alive count when one of its spawns dies/despawns
-    /// (World.destroy calls this; stock kill attrition on the area budget).
-    pub fn releaseRule(self: *Director, rule: u16) void {
+    /// Free one slot in the district the spawn was charged against. Stock
+    /// reads the entity's stored spawner chunk key, not where the body dies
+    /// (spawning.md §3), so `key` is the `spawn_district` stamped at spawn. A
+    /// kill also lowers the district cap until the respawn delay elapses
+    /// (DecCount killed=true); a despawn only frees the slot. `key` 0 falls
+    /// back to the position, for callers that never stamped a district.
+    pub fn releaseRule(self: *Director, rule: u16, key: u32, x: f32, z: f32, killed: bool) void {
         if (rule >= rule_budget_cap) return;
+        const k: u32 = if (key != 0) key else districtKey(x, z);
+        // Free the slot that carries this district, not whatever the picker
+        // lands on now: a recycled or never-stamped key must not decrement a
+        // different district's count.
         const st = &self.rule_budgets[rule];
-        if (st.count > 0) st.count -= 1;
+        var d: ?*DistrictBudget = null;
+        for (&st.districts) |*cand| {
+            if (cand.key == k) {
+                d = cand;
+                break;
+            }
+        }
+        if (d == null and st.fallback.key == k) d = &st.fallback;
+        const slot = d orelse return;
+        if (slot.count > 0) slot.count -= 1;
+        if (killed and slot.max_count > 1) slot.max_count -= 1;
     }
 
     /// Stock's blood-moon vulture swap roll (`SpawnZombie` IL_0049: the
@@ -1091,7 +1270,7 @@ pub const Director = struct {
         const rules = w.rules.bloodmoon;
         const max_parties: usize = @min(rules.max_parties, bm_parties_cap);
         const join2 = rules.party_join_dist * rules.party_join_dist;
-        self.bm_parties = [_]BmParty{.{}} ** bm_parties_cap;
+        self.bm_parties = @as([bm_parties_cap]BmParty, @splat(.{}));
         self.bm_party_n = 0;
         for (w.kind_groups.slice(.player)) |p| {
             if (!w.alive[p] or !w.mask[p].player or !w.mask[p].transform) continue;
@@ -1312,6 +1491,9 @@ pub const Director = struct {
             const gz: i32 = @floor(z);
             if (!ok(self.mob_spawn_ok_ctx, gx, gy, gz)) return null;
         }
+        // Stock anti-stacking (spawning.md §2): a spawn aborts when any entity
+        // already stands in the 4 x 2.5 x 4 box around the chosen position.
+        if (spawnBoxOccupied(w, x, y, z)) return null;
         var ct = w.class_table[1];
         const fallback = if (self.clock.isNight()) self.night_group else self.day_group;
         const grp = if (group_override.len > 0)
@@ -1415,6 +1597,45 @@ pub const Director = struct {
             },
         }
         return slot;
+    }
+
+    /// Stock `GetEntitiesInBounds` over a box of size (4, 2.5, 4) around the
+    /// chosen spawn (spawning.md IL_03f8): anything already inside aborts the
+    /// spawn. Covers every kind, so a zombie does not materialise on a player,
+    /// an animal or another zombie.
+    fn spawnBoxOccupied(w: *const ecs_world.World, x: f32, y: f32, z: f32) bool {
+        const kinds = [_]ecs_world.Kind{ .player, .zombie, .animal, .trader, .vehicle, .turret, .drone };
+        for (kinds) |kind| {
+            for (w.kind_groups.slice(kind)) |s| {
+                if (!w.alive[s] or !w.mask[s].transform) continue;
+                const t = w.transform[s];
+                if (@abs(t.x - x) < 2.0 and @abs(t.y - y) < 1.25 and @abs(t.z - z) < 2.0) return true;
+            }
+        }
+        return false;
+    }
+
+    /// Stock view-cone rejection (spawning.md, `GetRandomSpawnPositionInArea`):
+    /// a point any player within 50 m can see is refused. `IsInViewCone` is a
+    /// horizontal yaw test against half of `MaxViewAngle` (entity-ai.md
+    /// IL=40); a player with no class angle uses the Rules cone floor.
+    pub fn spawnInPlayerView(w: *const ecs_world.World, x: f32, z: f32) bool {
+        const reach: f32 = 50.0;
+        for (w.kind_groups.slice(.player)) |p| {
+            if (!w.alive[p] or !w.mask[p].transform) continue;
+            const t = w.transform[p];
+            const dx = x - t.x;
+            const dz = z - t.z;
+            if (dx * dx + dz * dz >= reach * reach) continue;
+            const hd = @sqrt(dx * dx + dz * dz);
+            if (hd < 0.001) return true;
+            const full = w.class_id[p].view_angle_deg;
+            const half_deg = if (full > 0) full / 2.0 else w.rules.ai.view_cone_half_deg;
+            const yaw_r = t.yaw * (std.math.pi / 180.0);
+            const dot = (dx * @sin(yaw_r) + dz * @cos(yaw_r)) / hd;
+            if (dot >= @cos(half_deg * (std.math.pi / 180.0))) return true;
+        }
+        return false;
     }
 
     /// Y of the nearest online player to (x,z), or null with no players.

@@ -41,7 +41,7 @@ pub fn handleParty(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u
             return true;
         };
         if (self.rejectIfNotSender(c, peer.local_id, claim.owner_entity, .none)) return true;
-        _ = self.repairClaimArea(req.x, req.z);
+        _ = self.repairClaimArea(req.x, req.y, req.z);
         // Stock answers the repair pass with Setup(blockPos, false) to the
         // requester (repair coroutine IL_0337), clearing its IsRepairing.
         if (packages.buildLandClaimRepairBody(&self.body_buf, req.x, req.y, req.z, false)) |done| {

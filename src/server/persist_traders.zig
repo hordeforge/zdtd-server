@@ -218,7 +218,7 @@ pub fn loadTraders(self: *Game) !void {
             const markup = @as(i8, @bitCast(data[o + 7]));
             o += 8;
             // v2 stat blob; v1 records end here and restore as no stats.
-            var stats: [ecs.components.max_item_stats]ecs.components.ItemStat = .{ecs.components.ItemStat{}} ** ecs.components.max_item_stats;
+            var stats: [ecs.components.max_item_stats]ecs.components.ItemStat = @splat(ecs.components.ItemStat{});
             var stats_n: u8 = 0;
             if (v2) {
                 if (o >= data.len) return error.Truncated;

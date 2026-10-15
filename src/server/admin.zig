@@ -55,9 +55,9 @@ pub const Server = struct {
     listener: tcp.Listener = .{},
     port: u16 = 0,
     /// Persistent telnet-style sessions (-1 = free slot).
-    sessions: [max_sessions]tcp.Handle = .{-1} ** max_sessions,
+    sessions: [max_sessions]tcp.Handle = @splat(-1),
     recv_bufs: [max_sessions][max_cmd]u8 = undefined,
-    recv_lens: [max_sessions]usize = .{0} ** max_sessions,
+    recv_lens: [max_sessions]usize = @splat(0),
     /// Session whose line is currently being handled (reply target).
     active: usize = 0,
     /// Set before `listen`: decides the bind address and the login prompt.
@@ -65,8 +65,8 @@ pub const Server = struct {
     greeting: Greeting = .{},
     /// Per-session login state. A session with `authed[i] == false` never reaches
     /// the command dispatcher; its lines are password attempts only.
-    authed: [max_sessions]bool = .{false} ** max_sessions,
-    fails: [max_sessions]u8 = .{0} ** max_sessions,
+    authed: [max_sessions]bool = @splat(false),
+    fails: [max_sessions]u8 = @splat(0),
     /// Failed attempts across every session since the last success or lockout.
     /// The per-session counter resets whenever a socket closes, so on its own it
     /// throttles nothing: a brute force just disconnects one attempt short of
@@ -101,9 +101,9 @@ pub const Server = struct {
             if (s.* >= 0) tcp.closeFd(s.*);
             s.* = -1;
         }
-        self.recv_lens = .{0} ** max_sessions;
-        self.authed = .{false} ** max_sessions;
-        self.fails = .{0} ** max_sessions;
+        self.recv_lens = @splat(0);
+        self.authed = @splat(false);
+        self.fails = @splat(0);
         self.fails_total = 0;
         self.login_lock_until_ns = 0;
         self.listener.deinit();

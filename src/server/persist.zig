@@ -731,7 +731,7 @@ test "player save upgrades offline v15 inventory slots" {
     try std.testing.expectEqual(saved.len - 8, try zpvRecordLen(saved, 8, persist_version));
     const inv_pos = 8 + 2 + 16;
     try std.testing.expectEqualSlices(u8, data.items[inv_pos..][0..22], saved[inv_pos..][0..22]);
-    try std.testing.expectEqualSlices(u8, &([_]u8{0} ** 31), saved[inv_pos + 22 ..][0..31]);
+    try std.testing.expectEqualSlices(u8, &@as([31]u8, @splat(0)), saved[inv_pos + 22 ..][0..31]);
     try savePlayers(g);
     const again = try io_fs.readFileAll(std.testing.allocator, path);
     defer std.testing.allocator.free(again);
@@ -784,11 +784,11 @@ test "player save preserves full inventory journal and buffs" {
     var capture: @import("../litenet/peer.zig").Capture = .{};
     const cl = try g.attachJoinedClient(&capture);
     const ps = g.sim.playerByPeer(cl.slot).?;
-    const objectives = [_]ecs.quest.FlatObjective{.{}} ** ecs.quest.max_quest_objectives;
+    const objectives: [ecs.quest.max_quest_objectives]ecs.quest.FlatObjective = @splat(.{});
     const defs = [_]ecs.quest.QuestDef{.{
         .id = 42,
         .kind = .kill_zombies,
-        .name = "q" ** max_quest_name_len,
+        .name = &@import("../util/root.zig").repeat("q", max_quest_name_len),
         .title = "capacity",
         .objectives = &objectives,
     }};
@@ -800,7 +800,7 @@ test "player save preserves full inventory journal and buffs" {
         .active = true,
         .def_id = 42,
         .quest_code = @intCast(i + 1),
-        .obj_progress = [_]u16{7} ** ecs.quest.max_quest_objectives,
+        .obj_progress = @as([ecs.quest.max_quest_objectives]u16, @splat(7)),
     };
     for (&g.sim.buffsMut(ps).slots, 0..) |*b, i| b.* = .{
         .active = true,
@@ -834,7 +834,7 @@ test "player save preserves full inventory journal and buffs" {
     try std.testing.expect(cl.has_bed);
     try std.testing.expectEqual(@as(i32, 34), cl.bed_z);
     var oversized_defs = defs;
-    oversized_defs[0].name = "q" ** (max_quest_name_len + 1);
+    oversized_defs[0].name = &@import("../util/root.zig").repeat("q", (max_quest_name_len + 1));
     g.sim.catalog = .{ .defs = &oversized_defs };
     try std.testing.expectError(error.QuestNameTooLong, savePlayers(g));
     const unchanged = try io_fs.readFileAll(std.testing.allocator, path);

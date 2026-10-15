@@ -111,15 +111,15 @@ union above.
 
 | Verbs (aliases grouped) | Line |
 |---|---|
-| `help`, `commands`, `?` | 370 |
-| `gettime`, `gt` | 375 |
-| `junkdrone`, `jds`, `serverjunkdrone` | 382 |
-| `listplayers`, `lp` | 393 |
-| `listplayerids`, `lpi` | 401 |
-| `listents`, `le` | 411 |
-| `say`, `s` | 415 |
-| `version` | 426 |
-| `dm`, `cm`, `creativemenu`, `settempunit`, `stu`, `debugmenu` | 428 |
+| `help`, `commands`, `?` | 372 |
+| `gettime`, `gt` | 377 |
+| `junkdrone`, `jds`, `serverjunkdrone` | 384 |
+| `listplayers`, `lp` | 395 |
+| `listplayerids`, `lpi` | 403 |
+| `listents`, `le` | 413 |
+| `say`, `s` | 417 |
+| `version` | 428 |
+| `dm`, `cm`, `creativemenu`, `settempunit`, `stu`, `debugmenu` | 430 |
 
 
 ## Player console allowlist (`src/server/c2s_text.zig`)

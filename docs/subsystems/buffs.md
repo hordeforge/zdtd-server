@@ -47,11 +47,11 @@ pub const BuffFlags = packed struct(u8) {
 };
 ```
 
-The six stock bits are the ones the tick switch reads; the last two are bookkeeping for the triggered-row pass and never cross the wire (`src/ecs/components.zig:1279`). The set itself is one flat array with a linear lookup and a count (`src/ecs/components.zig:1315`):
+The six stock bits are the ones the tick switch reads; the last two are bookkeeping for the triggered-row pass and never cross the wire (`src/ecs/components.zig:1767`). The set itself is one flat array with a linear lookup and a count (`src/ecs/components.zig:1315`):
 
 ```zig
 pub const BuffSet = struct {
-    slots: [max_buffs_per_entity]BuffInstance = [_]BuffInstance{.{}} ** max_buffs_per_entity,
+    slots: [max_buffs_per_entity]BuffInstance = @splat(.{}),
 
     pub fn find(self: *BuffSet, def_id: u16) ?*BuffInstance {
         for (&self.slots) |*s| {
@@ -157,7 +157,7 @@ The caps are zdtd bounds measured against the stock file, not stock rules: 2048 
 
 ## The perk and attribute passive path
 
-The passive effects that reach gameplay are folded into one POD of tracked stats: the four survival maxima, their change over time, the two injury blockage caps and the three damage resistances (`src/assets/buffs.zig:987`):
+The passive effects that reach gameplay are folded into one POD of tracked stats: the four survival maxima, their change over time, the two injury blockage caps and the three damage resistances (`src/assets/buffs.zig:786`):
 
 ```zig
 pub const TrackedDeltas = struct {

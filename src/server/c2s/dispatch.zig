@@ -45,6 +45,16 @@ pub fn handlePackage(self: *Game, c: *Client, peer: *ln_peer.Peer, id: u16, body
     if (try c2s_blocks_props.handle(self, c, peer, name, body)) return;
     if (try c2s_quest.handle(self, c, peer, name, body)) return;
     if (try c2s_misc.handle(self, c, peer, name, body)) return;
+    // Stock ignores these two outright: DynamicMesh's read() returns on the
+    // server unless the dynamic-mesh content is installed, and Debug has no
+    // ProcessPackage branch at all. Count them separately so an operator sees
+    // they are answered by design, not a coverage hole.
+    if (std.mem.eql(u8, name, "NetPackageDynamicMesh") or
+        std.mem.eql(u8, name, "NetPackageDebug"))
+    {
+        self.harness.counters.inc(.c2s_noop);
+        return;
+    }
     self.harness.counters.inc(.c2s_unhandled);
     const un = self.harness.counters.get(.c2s_unhandled);
     log.warnEvery(un, "unhandled C2S pkg={s} local_id={d} n={d}\n", .{ name, peer.local_id, un });

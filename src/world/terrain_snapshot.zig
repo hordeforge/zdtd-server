@@ -40,15 +40,15 @@ pub const max_chunks: usize = 256;
 /// Topmost non-air block Y per column, mirroring store.Chunk.heights. Kept
 /// dense (max_chunks, not cap) because the table is 2x oversized for probing.
 const ChunkCols = struct {
-    surface: [256]u8 = .{0} ** 256,
+    surface: [256]u8 = @splat(0),
 };
 
 pub const Snapshot = struct {
-    keys: [cap]u64 = .{0} ** cap,
-    used: [cap]bool = .{false} ** cap,
+    keys: [cap]u64 = @splat(0),
+    used: [cap]bool = @splat(false),
     /// Index into `cols` for a used slot.
-    at: [cap]u16 = .{0} ** cap,
-    cols: [max_chunks]ChunkCols = [_]ChunkCols{.{}} ** max_chunks,
+    at: [cap]u16 = @splat(0),
+    cols: [max_chunks]ChunkCols = @splat(.{}),
     n: usize = 0,
     /// Column height of the world this snapshot was rebuilt from (wire
     /// profile; stock 256). Set in `rebuild`.

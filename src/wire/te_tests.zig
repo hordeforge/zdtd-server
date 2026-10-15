@@ -114,7 +114,7 @@ test "RecipeQueueItem carries a repair entry through the byte round trip" {
     q.amount_to_repair = 40;
     q.recipe_len = 0;
     var qbuf: [16]workstations_mod.QueueItem = undefined;
-    @memcpy(qbuf[0..p.queue_n - 1], p.queue[0..p.queue_n - 1]);
+    @memcpy(qbuf[0 .. p.queue_n - 1], p.queue[0 .. p.queue_n - 1]);
     qbuf[p.queue_n - 1] = q;
     var again: [8192]u8 = undefined;
     _ = try buildWorkstationTeBody(&again, p.handle, p.world_x, p.world_y, p.world_z, p.block_id, .{
@@ -811,7 +811,7 @@ test "a canvas composite body parses and a malformed canvas module is refused" {
     var cbuf: [64]u8 = undefined;
     var cw: binary.Writer = .{ .buf = &cbuf };
     try cw.writeString("prefab");
-    try cw.writeBytes(&([_]u8{7} ** 16));
+    try cw.writeBytes(&@as([16]u8, @splat(7))); // signGuid
     try cw.writeByte(2); // BlendMode
     try cw.writeByte(1); // CanvasRotation
     try cw.writeBool(true); // ShowOnImposter

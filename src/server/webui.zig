@@ -80,7 +80,7 @@ pub const PlayerRow = struct {
     y: f32 = 0,
     z: f32 = 0,
     name_len: u8 = 0,
-    name: [max_name]u8 = .{0} ** max_name,
+    name: [max_name]u8 = @splat(0),
 };
 
 /// One row per loaded Wasm plugin module (`Game.wasm_plugins`; module names
@@ -89,7 +89,7 @@ pub const ModuleRow = struct {
     used: bool = false,
     disabled: bool = false,
     name_len: u8 = 0,
-    name: [64]u8 = .{0} ** 64,
+    name: [64]u8 = @splat(0),
 };
 
 pub const Snapshot = struct {
@@ -142,6 +142,10 @@ pub const Snapshot = struct {
     bounds_rejects: u64 = 0,
     movement_rejects: u64 = 0,
     decode_rejects: u64 = 0,
+    // Named-C2S tail: unhandled is a coverage hole, noop is a stock no-op arm
+    // (Debug/DynamicMesh) answering on purpose.
+    c2s_unhandled: u64 = 0,
+    c2s_noop: u64 = 0,
     // Guard policy (quarantine rung / load shed), same counters as the admin
     // `guardpolicy` command so an operator sees the guard firing on the dashboard.
     guard_kicks: u64 = 0,
@@ -189,9 +193,9 @@ pub const Snapshot = struct {
     os_procs: u32 = 0,
     os_uptime_s: u64 = 0,
     world_name_len: u8 = 0,
-    world_name: [48]u8 = .{0} ** 48,
-    players: [max_players_snap]PlayerRow = [_]PlayerRow{.{}} ** max_players_snap,
-    modules: [plugin_mod.wasm.max_wasm_plugins]ModuleRow = [_]ModuleRow{.{}} ** plugin_mod.wasm.max_wasm_plugins,
+    world_name: [48]u8 = @splat(0),
+    players: [max_players_snap]PlayerRow = @splat(.{}),
+    modules: [plugin_mod.wasm.max_wasm_plugins]ModuleRow = @splat(.{}),
 };
 
 /// Called from HTTP poll with one admin line; must fill reply into out (same as admin TCP).
@@ -210,7 +214,7 @@ pub const Server = struct {
     secret_buf: [max_secret]u8 = undefined,
     secret_len: usize = 0,
     /// HMAC session material for cookie/CSRF (never the raw secret).
-    session_token: [session_token_hex_len]u8 = .{'0'} ** session_token_hex_len,
+    session_token: [session_token_hex_len]u8 = @splat('0'),
     /// Monotonic deadline for the current browser session. The cookie's
     /// Max-Age is not an authorization boundary because a stolen cookie can be
     /// replayed by a non-browser client after that client-side deadline.
@@ -235,7 +239,7 @@ pub const Server = struct {
     /// it per request burns tick-thread CPU for bytes that only change when the
     /// session token does. Freed on logout, re-login, and deinit.
     shell_gz: ?[]u8 = null,
-    shell_gz_for: [session_token_hex_len]u8 = .{0} ** session_token_hex_len,
+    shell_gz_for: [session_token_hex_len]u8 = @splat(0),
     /// Gzip of the dashboard bundle, compressed once for the process. The
     /// bundle is a compile-time constant, so this is the precompressed form
     /// the review asks for: one compression at first request, none after.
@@ -245,7 +249,7 @@ pub const Server = struct {
     /// comptime: hashing the 90 KiB bundle in the interpreter exceeds the
     /// backwards-branch budget, and the bytes are fixed before the first
     /// request regardless.
-    shell_js_etag: [18:0]u8 = .{0} ** 18,
+    shell_js_etag: [18:0]u8 = @splat(0),
     shell_js_etag_set: bool = false,
     /// Queued console line (legacy drain path; POST prefers admin_fn same-request).
     cmd_pending: bool = false,
@@ -260,7 +264,7 @@ pub const Server = struct {
     /// `/api/state.json` `console` array both read it (ops audit).
     audit_n: u8 = 0,
     audit_i: u8 = 0,
-    audit_lens: [max_audit]u8 = .{0} ** max_audit,
+    audit_lens: [max_audit]u8 = @splat(0),
     audit_lines: [max_audit][max_audit_line]u8 = undefined,
     /// POST /login brute-force throttle (process-local; single poll thread).
     login_fails: u32 = 0,
@@ -2255,13 +2259,15 @@ fn writeApmJson(w: *std.Io.Writer, s: *const Snapshot) !void {
     });
     // Same reject counters as HTML Errors panel / guardstats (tools use this JSON).
     try w.print(
-        \\,"phase_rejects":{d},"ownership_rejects":{d},"bounds_rejects":{d},"movement_rejects":{d},"decode_rejects":{d},"guard_kicks":{d},"guard_would_kicks":{d},"guard_quarantines":{d},"quarantine_rejects":{d},"load_shed_drops":{d},"hard_ceiling_downgrades":{d},"evidence_events":{d}
+        \\,"phase_rejects":{d},"ownership_rejects":{d},"bounds_rejects":{d},"movement_rejects":{d},"decode_rejects":{d},"c2s_unhandled":{d},"c2s_noop":{d},"guard_kicks":{d},"guard_would_kicks":{d},"guard_quarantines":{d},"quarantine_rejects":{d},"load_shed_drops":{d},"hard_ceiling_downgrades":{d},"evidence_events":{d}
     , .{
         s.phase_rejects,
         s.ownership_rejects,
         s.bounds_rejects,
         s.movement_rejects,
         s.decode_rejects,
+        s.c2s_unhandled,
+        s.c2s_noop,
         s.guard_kicks,
         s.guard_would_kicks,
         s.guard_quarantines,
@@ -2474,7 +2480,7 @@ test "readiness goes stale when the sim loop wedges" {
 }
 
 test "requestAuthorized cookie and bearer" {
-    const nonce = [_]u8{0x5a} ** 32;
+    const nonce: [32]u8 = @splat(0x5a);
     var sess: [session_token_hex_len]u8 = undefined;
     fillSessionToken("s3cr3t", &nonce, &sess);
     const h1 = "GET / HTTP/1.1\r\nAuthorization: Bearer s3cr3t\r\n";
@@ -2492,7 +2498,7 @@ test "requestAuthorized cookie and bearer" {
 }
 
 test "session token is bound to the secret" {
-    const nonce = [_]u8{0x5a} ** 32;
+    const nonce: [32]u8 = @splat(0x5a);
     var a: [session_token_hex_len]u8 = undefined;
     var b: [session_token_hex_len]u8 = undefined;
     fillSessionToken("s3cr3t", &nonce, &a);
@@ -2583,7 +2589,7 @@ test "cookie session rejects shared secret as CSRF" {
     var s: Server = .{};
     @memcpy(s.secret_buf[0..6], "s3cr3t");
     s.secret_len = 6;
-    const nonce = [_]u8{0x5a} ** 32;
+    const nonce: [32]u8 = @splat(0x5a);
     fillSessionToken("s3cr3t", &nonce, &s.session_token);
     s.session_expires_ns = clock.monoNs() +% (@as(u64, session_cookie_max_age_s) * std.time.ns_per_s);
     s.setAdminHandler(&s, testAdminEcho);
@@ -2615,7 +2621,7 @@ test "POST /login sets session cookie only on valid token" {
     var s: Server = .{};
     @memcpy(s.secret_buf[0..6], "s3cr3t");
     s.secret_len = 6;
-    const nonce = [_]u8{0x5a} ** 32;
+    const nonce: [32]u8 = @splat(0x5a);
     fillSessionToken("s3cr3t", &nonce, &s.session_token);
     try testServeHttp(&s, "POST /login HTTP/1.1\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: 12\r\n\r\ntoken=s3cr3t");
     try std.testing.expect(s.set_cookie);
@@ -2641,7 +2647,7 @@ test "malformed request lines are client faults, not internal errors" {
     var s: Server = .{};
     @memcpy(s.secret_buf[0..6], "s3cr3t");
     s.secret_len = 6;
-    const nonce = [_]u8{0x5a} ** 32;
+    const nonce: [32]u8 = @splat(0x5a);
     fillSessionToken("s3cr3t", &nonce, &s.session_token);
     // serveHttp must answer protocol faults itself (400-class) instead of
     // letting receiveHead errors bubble up to the 500 handler: garbage request
@@ -2685,7 +2691,7 @@ test "POST /api/modlet toggles a modlet and answers JSON to the dashboard" {
     s.modlets_state = &mst;
     @memcpy(s.secret_buf[0..6], "s3cr3t");
     s.secret_len = 6;
-    const nonce = [_]u8{0x5a} ** 32;
+    const nonce: [32]u8 = @splat(0x5a);
     fillSessionToken("s3cr3t", &nonce, &s.session_token);
     s.allocator = std.testing.allocator;
 
@@ -2849,7 +2855,7 @@ test "HEAD accepted on GET-only dashboard routes" {
     var s: Server = .{};
     @memcpy(s.secret_buf[0..6], "s3cr3t");
     s.secret_len = 6;
-    const nonce = [_]u8{0x5a} ** 32;
+    const nonce: [32]u8 = @splat(0x5a);
     fillSessionToken("s3cr3t", &nonce, &s.session_token);
     // Same contract as /healthz + /readyz: HEAD mirrors GET (200, empty body).
     const cases = [_][]const u8{
@@ -2875,7 +2881,7 @@ test "GET / serves the full rendered shell and not a truncated capture" {
     var s: Server = .{};
     @memcpy(s.secret_buf[0..6], "s3cr3t");
     s.secret_len = 6;
-    const nonce = [_]u8{0x5a} ** 32;
+    const nonce: [32]u8 = @splat(0x5a);
     fillSessionToken("s3cr3t", &nonce, &s.session_token);
     try testServeHttp(&s, "GET / HTTP/1.1\r\nAuthorization: Bearer s3cr3t\r\n\r\n");
     const resp = s.testResp();
@@ -2907,7 +2913,7 @@ test "acceptsGzip reads the negotiated coding and its q value" {
 }
 
 test "gzipAlloc round-trips a body through the gzip container" {
-    const body = "zdtd operator console: " ** 64;
+    const body = &@import("../util/root.zig").repeat("zdtd operator console: ", 64);
     const packed_body = try gzipAlloc(std.testing.allocator, body, flate.Compress.Options.default);
     defer std.testing.allocator.free(packed_body);
     try std.testing.expect(packed_body.len < body.len);
@@ -2926,7 +2932,7 @@ test "GET / gzips the shell only when the client asks for it" {
     defer s.clearShellGz();
     @memcpy(s.secret_buf[0..6], "s3cr3t");
     s.secret_len = 6;
-    const nonce = [_]u8{0x5a} ** 32;
+    const nonce: [32]u8 = @splat(0x5a);
     fillSessionToken("s3cr3t", &nonce, &s.session_token);
     try testServeHttp(&s, "GET / HTTP/1.1\r\nAuthorization: Bearer s3cr3t\r\nAccept-Encoding: gzip\r\n\r\n");
     const gz = s.testResp();
@@ -2975,7 +2981,7 @@ test "GET /api/state.json carries the frozen dashboard contract" {
     var s: Server = .{};
     @memcpy(s.secret_buf[0..6], "s3cr3t");
     s.secret_len = 6;
-    const nonce = [_]u8{0x5a} ** 32;
+    const nonce: [32]u8 = @splat(0x5a);
     fillSessionToken("s3cr3t", &nonce, &s.session_token);
     s.snap.tick_n = 7;
     s.snap.day = 3;
@@ -3039,7 +3045,7 @@ test "GET /api/state.json with an idle server has empty arrays" {
     var s: Server = .{};
     @memcpy(s.secret_buf[0..6], "s3cr3t");
     s.secret_len = 6;
-    const nonce = [_]u8{0x5a} ** 32;
+    const nonce: [32]u8 = @splat(0x5a);
     fillSessionToken("s3cr3t", &nonce, &s.session_token);
     try testServeHttp(&s, "GET /api/state.json HTTP/1.1\r\nAuthorization: Bearer s3cr3t\r\n\r\n");
     const resp = s.testResp();
@@ -3095,7 +3101,7 @@ test "GET /api/state.json carries the modlet roster as a populated array" {
     s.modlets_state = &mst;
     @memcpy(s.secret_buf[0..6], "s3cr3t");
     s.secret_len = 6;
-    const nonce = [_]u8{0x5a} ** 32;
+    const nonce: [32]u8 = @splat(0x5a);
     fillSessionToken("s3cr3t", &nonce, &s.session_token);
 
     try testServeHttp(&s, "GET /api/state.json HTTP/1.1\r\nAuthorization: Bearer s3cr3t\r\n\r\n");
@@ -3125,7 +3131,7 @@ test "retired partial routes answer 404" {
     var s: Server = .{};
     @memcpy(s.secret_buf[0..6], "s3cr3t");
     s.secret_len = 6;
-    const nonce = [_]u8{0x5a} ** 32;
+    const nonce: [32]u8 = @splat(0x5a);
     fillSessionToken("s3cr3t", &nonce, &s.session_token);
     const cases = [_][]const u8{
         "GET /partials/status HTTP/1.1\r\nAuthorization: Bearer s3cr3t\r\n\r\n",
@@ -3145,7 +3151,7 @@ test "POST /api/cmd answers JSON for the dashboard" {
     var s: Server = .{};
     @memcpy(s.secret_buf[0..6], "s3cr3t");
     s.secret_len = 6;
-    const nonce = [_]u8{0x5a} ** 32;
+    const nonce: [32]u8 = @splat(0x5a);
     fillSessionToken("s3cr3t", &nonce, &s.session_token);
     s.setAdminHandler(&s, testAdminEcho);
 
@@ -3193,7 +3199,7 @@ test "POST /api/cmd answers ok:false in JSON when the admin reply failed" {
     var s: Server = .{};
     @memcpy(s.secret_buf[0..6], "s3cr3t");
     s.secret_len = 6;
-    const nonce = [_]u8{0x5a} ** 32;
+    const nonce: [32]u8 = @splat(0x5a);
     fillSessionToken("s3cr3t", &nonce, &s.session_token);
     s.setAdminHandler(&s, testAdminFailing);
 
@@ -3249,8 +3255,8 @@ test "GET /login redirects when session cookie is already valid" {
 }
 
 test "fillSessionToken rotates with its nonce and is not the secret" {
-    const nonce_a = [_]u8{0x11} ** 32;
-    const nonce_b = [_]u8{0x22} ** 32;
+    const nonce_a: [32]u8 = @splat(0x11);
+    const nonce_b: [32]u8 = @splat(0x22);
     var a: [session_token_hex_len]u8 = undefined;
     var b: [session_token_hex_len]u8 = undefined;
     fillSessionToken("s3cr3t", &nonce_a, &a);
@@ -3336,6 +3342,8 @@ test "renderApmJson keeps the tool document contract" {
     try std.testing.expect(std.mem.find(u8, js, "\"bounds_rejects\":") != null);
     try std.testing.expect(std.mem.find(u8, js, "\"movement_rejects\":") != null);
     try std.testing.expect(std.mem.find(u8, js, "\"decode_rejects\":") != null);
+    try std.testing.expect(std.mem.find(u8, js, "\"c2s_unhandled\":") != null);
+    try std.testing.expect(std.mem.find(u8, js, "\"c2s_noop\":") != null);
     try std.testing.expect(std.mem.find(u8, js, "\"guard_kicks\":") != null);
     try std.testing.expect(std.mem.find(u8, js, "\"guard_quarantines\":") != null);
     try std.testing.expect(std.mem.find(u8, js, "\"load_shed_drops\":") != null);
@@ -3372,7 +3380,7 @@ test "login lockout after repeated failures" {
     var s: Server = .{};
     @memcpy(s.secret_buf[0..6], "s3cr3t");
     s.secret_len = 6;
-    const nonce = [_]u8{0x5a} ** 32;
+    const nonce: [32]u8 = @splat(0x5a);
     fillSessionToken("s3cr3t", &nonce, &s.session_token);
     var i: u32 = 0;
     while (i < login_fail_limit) : (i += 1) {
@@ -3457,7 +3465,7 @@ test "renderShell serves the app mount point and the JSON poll" {
     // component markup (that lives in src/server/webui/ts/shell.tsx).
     var buf: [max_shell_html]u8 = undefined;
     var sess: [session_token_hex_len]u8 = undefined;
-    const nonce = [_]u8{0x33} ** 32;
+    const nonce: [32]u8 = @splat(0x33);
     fillSessionToken("s3cr3t", &nonce, &sess);
     const html = try renderShell(&buf, sess[0..], "0123456789abcdef");
     // App mount point and the state endpoint the bundle polls.

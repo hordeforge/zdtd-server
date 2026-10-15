@@ -296,8 +296,8 @@ pub fn buildInvDataResponseItems(
 }
 
 test "inventory data request stock layout and not-found response" {
-    var key: [16]u8 = .{1} ** 16;
-    var tok: [16]u8 = .{2} ** 16;
+    var key: [16]u8 = @splat(1);
+    var tok: [16]u8 = @splat(2);
     var req_buf: [36]u8 = undefined;
     @memcpy(req_buf[0..16], &key);
     std.mem.writeInt(i32, req_buf[16..20], 42, .little);

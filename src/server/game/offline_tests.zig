@@ -277,7 +277,7 @@ test "offline challenge Guid replays from the DST run seed" {
         var cap: ln_peer.Capture = .{};
         const cl = try g.attachJoinedClient(&cap);
         ch_a = cl.challenge;
-        try std.testing.expect(!std.mem.eql(u8, &ch_a, &[_]u8{0} ** 16));
+        try std.testing.expect(!std.mem.eql(u8, &ch_a, &@as([16]u8, @splat(0))));
     }
     {
         const g = try Game.createWithOptions(std.testing.allocator, dir_b, 0, .{

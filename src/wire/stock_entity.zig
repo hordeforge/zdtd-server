@@ -128,23 +128,23 @@ pub const profile_name_cap = 32;
 /// player appeared as the same default character. The receive buffers are
 /// transient, so the parsed names are copied into fixed storage here.
 pub const OwnedProfile = struct {
-    archetype: [profile_name_cap]u8 = [_]u8{0} ** profile_name_cap,
+    archetype: [profile_name_cap]u8 = @splat(0),
     archetype_len: u8 = 0,
     is_male: bool = true,
-    race_name: [profile_name_cap]u8 = [_]u8{0} ** profile_name_cap,
+    race_name: [profile_name_cap]u8 = @splat(0),
     race_name_len: u8 = 0,
     variant_number: u8 = 0,
-    hair_name: [profile_name_cap]u8 = [_]u8{0} ** profile_name_cap,
+    hair_name: [profile_name_cap]u8 = @splat(0),
     hair_name_len: u8 = 0,
-    hair_color: [profile_name_cap]u8 = [_]u8{0} ** profile_name_cap,
+    hair_color: [profile_name_cap]u8 = @splat(0),
     hair_color_len: u8 = 0,
-    mustache_name: [profile_name_cap]u8 = [_]u8{0} ** profile_name_cap,
+    mustache_name: [profile_name_cap]u8 = @splat(0),
     mustache_name_len: u8 = 0,
-    chops_name: [profile_name_cap]u8 = [_]u8{0} ** profile_name_cap,
+    chops_name: [profile_name_cap]u8 = @splat(0),
     chops_name_len: u8 = 0,
-    beard_name: [profile_name_cap]u8 = [_]u8{0} ** profile_name_cap,
+    beard_name: [profile_name_cap]u8 = @splat(0),
     beard_name_len: u8 = 0,
-    eye_color: [profile_name_cap]u8 = [_]u8{0} ** profile_name_cap,
+    eye_color: [profile_name_cap]u8 = @splat(0),
     eye_color_len: u8 = 0,
 
     /// Borrowed view of the owned names, for the writers that take slices.
@@ -348,7 +348,7 @@ pub const FallingBlocksInfo = struct { blocks: []const FallingBlock };
 /// `hairColor` | `mustacheName` | `chopsName` | `beardName` | `eyeColor`.
 ///
 /// Stock substitutes a literal for a null string on the last six: empty for
-/// five of them and **"Blue01"** for `eyeColor` (IL_00AC). Zig has no null
+/// five of them and **@import("../util/root.zig").repeat("Blue01", for) `eyeColor` (IL_00AC). Zig has no null
 /// string, so an empty slice here is written as empty rather than substituted;
 /// the one caller that sends a profile sets `eye_color` explicitly
 /// (packages.zig), so the stock default is not silently dropped.
@@ -518,7 +518,7 @@ pub const ParsedSpawnRequest = struct {
     on_ground: bool = true,
     has_request_key: bool = false,
     requested_by: i32 = 0,
-    request_key: [16]u8 = [_]u8{0} ** 16,
+    request_key: [16]u8 = @splat(0),
     /// fallingTree middle: the trunk cell the client chose and the fall
     /// direction it wants (protocol.md section 5.1 middle).
     falling_tree: ?FallingTreeInfo = null,

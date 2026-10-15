@@ -176,10 +176,10 @@ pub const EntityDef = struct {
     /// hashes of the entity classes this class will APPROACH and attack, e.g. a
     /// wolf listing EntityZombie/EntityAnimalStag. `target_class_n` 0 = no list
     /// parsed, which keeps the legacy player-only behaviour (fail closed).
-    target_class_hashes: [max_target_classes]i32 = .{0} ** max_target_classes,
+    target_class_hashes: [max_target_classes]i32 = @splat(0),
     /// Per-entry `chaseTimeMax` from the same `Type,chaseTime` pair list
     /// (`EAIApproachAndAttackTarget.SetData` IL=34 steps the split by 2).
-    target_chase_max: [max_target_classes]f32 = .{0} ** max_target_classes,
+    target_chase_max: [max_target_classes]f32 = @splat(0),
     /// `chaseTimeMax` of the `EntityPlayer` entry (0 = no player entry, so a
     /// player chase never times out).
     target_chase_max_players: f32 = 0,
@@ -792,7 +792,7 @@ fn parseNearestTargetClasses(
     // even though it can look numeric or empty.
     var n: u8 = 0;
     var idx: usize = 0;
-    var out_name: [max_target_classes][]const u8 = .{""} ** max_target_classes;
+    var out_name: [max_target_classes][]const u8 = @splat("");
     var it = std.mem.splitScalar(u8, data[ci + marker.len ..], ',');
     while (it.next()) |raw| : (idx += 1) {
         if (idx % 2 == 1) {
@@ -843,8 +843,8 @@ fn resolvedNearestTargetClasses(
             var rest = e.value_ptr.*;
             while (rest.len > 0) {
                 const cut = std.mem.findScalar(u8, rest, '|') orelse rest.len;
-                var scratch: [max_target_classes]i32 = .{0} ** max_target_classes;
-                var scratch_chase: [max_target_classes]f32 = .{0} ** max_target_classes;
+                var scratch: [max_target_classes]i32 = @splat(0);
+                var scratch_chase: [max_target_classes]f32 = @splat(0);
                 var scratch_players: f32 = 0;
                 if (parseNearestTargetClasses(std.mem.trim(u8, rest[0..cut], " \t\r\n"), &scratch, &scratch_chase, &scratch_players)) |n| {
                     out.* = scratch;
@@ -1294,8 +1294,8 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable
         const ai_attack = resolvedAiAttacks(&classes, name);
         const target_sense = resolvedTargetPlayerSense(&classes, name);
         const hurt_classes = resolvedHurtTargetClasses(&classes, name);
-        var target_hashes: [max_target_classes]i32 = .{0} ** max_target_classes;
-        var target_chase: [max_target_classes]f32 = .{0} ** max_target_classes;
+        var target_hashes: [max_target_classes]i32 = @splat(0);
+        var target_chase: [max_target_classes]f32 = @splat(0);
         var target_chase_players: f32 = 0;
         const target_n = resolvedNearestTargetClasses(&classes, name, &target_hashes, &target_chase, &target_chase_players);
         const block_if = resolvedBlockIfAlert(&classes, name);

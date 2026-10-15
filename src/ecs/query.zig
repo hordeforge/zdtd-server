@@ -150,7 +150,7 @@ pub fn copyKindInto(w: *const World, kind: Kind, out: []Slot) usize {
 /// id lists, AI admission) versus the open View scan. `kinds.len` is small
 /// (zombie+animal on the AI/despawn path).
 pub fn copyKindsInto(w: *const World, kinds: []const Kind, out: []Slot) usize {
-    var idx: [16]usize = .{0} ** 16;
+    var idx: [16]usize = @splat(0);
     std.debug.assert(kinds.len <= idx.len);
     var n: usize = 0;
     while (n < out.len) {

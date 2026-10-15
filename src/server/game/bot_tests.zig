@@ -21,10 +21,10 @@ test "Bot.setName truncates on a UTF-8 codepoint boundary" {
     // Eight CJK ideographs are 24 bytes; a byte @min would keep a dangling
     // lead and put invalid UTF-8 into the player-mesh spawn body.
     var b: Bot = .{};
-    b.setName("名" ** 8);
+    b.setName(&@import("../../util/root.zig").repeat("名", 8));
     try std.testing.expectEqual(@as(usize, 21), b.name_len);
     try std.testing.expect(std.unicode.utf8ValidateSlice(b.name[0..b.name_len]));
-    try std.testing.expectEqualStrings("名" ** 7, b.name[0..b.name_len]);
+    try std.testing.expectEqualStrings(&@import("../../util/root.zig").repeat("名", 7), b.name[0..b.name_len]);
 }
 
 test "BotManager find/move/look/remove/removeAll on hand-seeded bots" {
@@ -132,7 +132,7 @@ test "BotManager fillSense writes the fixed 40-byte sense layout (v4)" {
     m.bots[1] = .{ .net_id = 101, .x = 0, .y = 70, .z = 0, .hp = 100, .alive = true };
     m.n = 2;
 
-    var out: [16 + 2 * sense_record_len]u8 = [_]u8{0} ** (16 + 2 * sense_record_len);
+    var out: [16 + 2 * sense_record_len]u8 = @splat(0);
     var n: usize = 0;
     m.fillSense(&out, 16, 2, &n);
     try std.testing.expectEqual(@as(usize, 2), n);
@@ -215,7 +215,7 @@ test "BotManager drainSenseEvents writes the 16-byte trailer layout and clears" 
     m.events[1] = .{ .attacker = -1, .victim = 11, .amount = 42 };
     m.ev_n = 2;
 
-    var out: [128]u8 = [_]u8{0xAA} ** 128;
+    var out: [128]u8 = @splat(0xAA);
     const written = m.drainSenseEvents(&out, 16, max_sense_events, 0);
     try std.testing.expectEqual(@as(usize, 2), written);
 
@@ -244,7 +244,7 @@ test "BotManager drainSenseEvents writes the 16-byte trailer layout and clears" 
     // Overflow events are dropped (the array is full, not grown).
     try std.testing.expect(m.damageFrom(10, 1, 99));
     try std.testing.expectEqual(@as(usize, max_sense_events), m.ev_n);
-    var out2: [512]u8 = [_]u8{0xBB} ** 512;
+    var out2: [512]u8 = @splat(0xBB);
     const capped = m.drainSenseEvents(&out2, 16, max_sense_events, 0);
     try std.testing.expectEqual(@as(usize, max_sense_events), capped);
     try std.testing.expectEqual(@as(u8, 0xBB), out2[16 + max_sense_events * sense_event_len]);
@@ -257,7 +257,7 @@ test "BotManager fillSenseBotInfo writes one kind-4 record per live bot" {
     m.bots[2] = .{ .net_id = 102, .x = 0, .y = 70, .z = 0, .hp = 0, .alive = false }; // skipped
     m.n = 2;
 
-    var out: [128]u8 = [_]u8{0xAA} ** 128;
+    var out: [128]u8 = @splat(0xAA);
     const written = m.fillSenseBotInfo(&out, 16, max_sense_info);
     try std.testing.expectEqual(@as(usize, 2), written);
 
@@ -270,7 +270,7 @@ test "BotManager fillSenseBotInfo writes one kind-4 record per live bot" {
     try std.testing.expectEqual(@as(i32, 101), std.mem.readInt(i32, rec1[4..8], .little));
 
     // Cap respected; tail untouched.
-    var out2: [128]u8 = [_]u8{0xBB} ** 128;
+    var out2: [128]u8 = @splat(0xBB);
     try std.testing.expectEqual(@as(usize, 1), m.fillSenseBotInfo(&out2, 16, 1));
     try std.testing.expectEqual(@as(u8, 0xBB), out2[32]);
 }

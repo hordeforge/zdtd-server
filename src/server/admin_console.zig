@@ -174,6 +174,8 @@ pub fn fillWebuiSnap(self: *Game) void {
     s.bounds_rejects = self.harness.counters.get(.bounds_rejects);
     s.movement_rejects = self.harness.counters.get(.movement_rejects);
     s.decode_rejects = self.harness.counters.get(.decode_rejects);
+    s.c2s_unhandled = self.harness.counters.get(.c2s_unhandled);
+    s.c2s_noop = self.harness.counters.get(.c2s_noop);
     s.guard_kicks = self.harness.counters.get(.guard_kicks);
     s.guard_would_kicks = self.harness.counters.get(.guard_would_kicks);
     s.guard_quarantines = self.harness.counters.get(.guard_quarantines);
@@ -1663,8 +1665,11 @@ pub fn runAdminLine(self: *Game, line: []const u8, source: []const u8) void {
             for (out2.lines[0..out2.n]) |ln| self.adminReply(ln);
         },
         .guardstats => {
-            var sb: [384]u8 = undefined;
-            const s = std.fmt.bufPrint(&sb, "phase={d} ownership={d} bounds={d} movement={d} decode={d} throttle={d} malformed={d} reconnects={d} evidence={d}\n", .{
+            var sb: [448]u8 = undefined;
+            // unhandled/noop split the named-C2S tail: unhandled is a coverage
+            // hole, noop is a stock no-op arm (Debug/DynamicMesh) answering on
+            // purpose. Both belong on the operator line.
+            const s = std.fmt.bufPrint(&sb, "phase={d} ownership={d} bounds={d} movement={d} decode={d} throttle={d} malformed={d} unhandled={d} noop={d} reconnects={d} evidence={d}\n", .{
                 self.harness.counters.get(.phase_rejects),
                 self.harness.counters.get(.ownership_rejects),
                 self.harness.counters.get(.bounds_rejects),
@@ -1672,6 +1677,8 @@ pub fn runAdminLine(self: *Game, line: []const u8, source: []const u8) void {
                 self.harness.counters.get(.decode_rejects),
                 self.harness.counters.get(.c2s_throttle),
                 self.harness.counters.get(.c2s_malformed),
+                self.harness.counters.get(.c2s_unhandled),
+                self.harness.counters.get(.c2s_noop),
                 self.harness.counters.get(.reconnects),
                 self.evidence.total,
             }) catch return;
@@ -2426,7 +2433,7 @@ test "player console help matches the c2s_text allowlist" {
 }
 
 pub const CommandLevel = struct {
-    verb: [24]u8 = [_]u8{0} ** 24,
+    verb: [24]u8 = @splat(0),
     level: u8 = 0,
 };
 

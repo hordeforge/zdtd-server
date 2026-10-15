@@ -32,7 +32,7 @@ pub const State = enum(u8) {
 /// the machine never invents an edge.
 pub fn canTransition(from: State, to: State) bool {
     return switch (from) {
-        .idle => to == .follow or to == .sentry or to == .heal or to == .noclip or to == .shutdown,
+        .idle => to == .follow or to == .sentry or to == .heal or to == .noclip or to == .shutdown or to == .attack,
         .sentry => to == .follow or to == .attack or to == .shutdown,
         .follow => to == .idle or to == .attack or to == .teleport or to == .shutdown,
         .heal => to == .idle,
@@ -82,8 +82,12 @@ test "the drone machine follows the 9-state transition table" {
     try std.testing.expect(d.setState(.idle));
     try std.testing.expect(d.setState(.heal));
     try std.testing.expect(d.setState(.idle));
-    // An edge the table does not list is refused and the state is unchanged.
-    try std.testing.expect(!d.setState(.attack));
+    // Idle to attack is stock: a drone at rest engages an enemy in range.
+    // An edge the table does not list is still refused.
+    try std.testing.expect(d.setState(.attack));
+    try std.testing.expect(d.setState(.follow));
+    try std.testing.expect(d.setState(.idle));
+    try std.testing.expect(!d.setState(.teleport));
     try std.testing.expectEqual(State.idle, d.state);
     // `setState` resets the state clock.
     d.tick(0.05);

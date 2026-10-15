@@ -232,7 +232,7 @@ pub const LandClaim = struct {
     owner_seen_day: u32 = 0,
     /// Stable owner key for persistence: the login name (entity ids are
     /// reassigned across restarts). Empty when the claim predates the field.
-    owner_name: [32]u8 = .{0} ** 32,
+    owner_name: [32]u8 = @splat(0),
     owner_name_len: u8 = 0,
     /// `TEFeatureLandClaim.showBounds`: the claim block's bounds-helper toggle
     /// (`Write` IL=381 emits the version only on the persistent stream, so the
@@ -603,10 +603,10 @@ pub const InitOptions = struct {
     /// `allow`), parsed by main.zig into fixed tables and applied over each
     /// module's own `manifest.toml deny` (paper 3.2.3 right-biased merge).
     plugin_policy_deny: [plugin_mod.manifest.max_policy_entries]plugin_mod.manifest.PolicyEntry =
-        [_]plugin_mod.manifest.PolicyEntry{.{}} ** plugin_mod.manifest.max_policy_entries,
+        @splat(.{}),
     plugin_policy_deny_n: u8 = 0,
     plugin_policy_allow: [plugin_mod.manifest.max_policy_entries]plugin_mod.manifest.PolicyEntry =
-        [_]plugin_mod.manifest.PolicyEntry{.{}} ** plugin_mod.manifest.max_policy_entries,
+        @splat(.{}),
     plugin_policy_allow_n: u8 = 0,
     /// Per-instance budget for Wasm plugins (fuel + max linear-memory pages;
     /// fuel is lifetime, never re-armed).
@@ -638,7 +638,7 @@ pub const max_skill_levels: usize = 128;
 /// on (stock `MinEventActionBase::Delay` coroutine; kill-event stamina at
 /// +1.0 s = +20 ticks). due_tick 0 = slot free.
 pub const PendingMod = struct {
-    stat: [16]u8 = .{0} ** 16,
+    stat: [16]u8 = @splat(0),
     stat_len: u8 = 0,
     op_add: bool = true,
     value: f32 = 0,
@@ -650,7 +650,7 @@ pub const EquipSeen = struct {
     id: u16 = 0,
     quality: u8 = 0,
     /// Installed mod ids (for stop-row cleanup after the slot is overwritten).
-    mods: [4]u16 = .{0} ** 4,
+    mods: [4]u16 = @splat(0),
 };
 
 pub const Client = struct {
@@ -712,7 +712,7 @@ pub const Client = struct {
     /// arena). Persisted via the players.zsv ZPV11 skill tail (skill_points +
     /// levels), restored by resolving names against the catalog (fail-closed
     /// when a mod removed the perk).
-    skill_levels: [max_skill_levels]SkillLevel = [_]SkillLevel{.{}} ** max_skill_levels,
+    skill_levels: [max_skill_levels]SkillLevel = @splat(.{}),
     skill_level_n: u8 = 0,
     /// Per-player custom variables (`assets/cvars.zig`): written by the
     /// EffectManager's ModifyCVar/RemoveCVar rows (the check buffs' entered-game
@@ -724,12 +724,12 @@ pub const Client = struct {
     /// writes point at catalog arena strings; a restored name has no such home,
     /// so `persist_players` interns it here (fail-closed: a full pool drops the
     /// variable's name and the entry is skipped).
-    cvar_name_pool: [cvars.max_cvars * 32]u8 = [_]u8{0} ** (cvars.max_cvars * 32),
+    cvar_name_pool: [cvars.max_cvars * 32]u8 = @splat(0),
     cvar_name_pool_used: usize = 0,
     /// Deferred ModifyStats refunds (`delay=` rows: 21 kill-event stamina
     /// refunds at 1.0 s). Fixed slots drained on the survival tick; a full
     /// row drops and counts (bounded, never grows).
-    pending_mods: [8]PendingMod = [_]PendingMod{.{}} ** 8,
+    pending_mods: [8]PendingMod = @splat(.{}),
     /// Combat-engagement timer (`EntityAlive.IsInCombat`): ticks remaining
     /// after the last dealt/received damage. The 0->active transition fires
     /// `onCombatEntered` progression rows (Enforcer Criminal Pursuit, Batter
@@ -797,14 +797,14 @@ pub const Client = struct {
     pending_area_cz: i32 = 0,
     pending_area_ring: i32 = 0,
     pending_area_idx: u32 = 0,
-    challenge: [16]u8 = .{0} ** 16,
+    challenge: [16]u8 = @splat(0),
     /// Monotonic ns when the challenge went out (stock auth-state StartTime).
     /// The auth-age sweep reaps peers that never echo past
     /// `MaxDurationInAuthState` (10 s); 0 = no challenge outstanding.
     challenge_ns: u64 = 0,
     slot: usize = 0,
     view_radius: i32 = default_view_radius,
-    name: [32]u8 = .{0} ** 32,
+    name: [32]u8 = @splat(0),
     name_len: usize = 0,
     /// Chunk keys currently known streamed to this client (WorldChunkCache keys).
     streamed: [max_streamed_chunks_cap]i64 = undefined,
@@ -820,14 +820,14 @@ pub const Client = struct {
     map_middle_x: i32 = 0,
     map_middle_z: i32 = 0,
     map_middle_set: bool = false,
-    map_chunks_sent: [map_window_n]u8 = [_]u8{0} ** map_window_n,
+    map_chunks_sent: [map_window_n]u8 = @splat(0),
     /// Dropped-backpack markers (RE EntityBackpack / PersistentPlayerData
     /// SetDroppedBackpackPositions): a position per bag this player has on
     /// the ground, oldest first. Stock caps the tracking at
     /// `max_tracked_backpacks` and evicts the oldest when a fourth drops
     /// (AddDroppedBackpack IL=69, save-region.md), so a player can be shown
     /// several at once and only loses the oldest marker.
-    backpacks: [max_tracked_backpacks][3]i32 = [_][3]i32{.{ 0, 0, 0 }} ** max_tracked_backpacks,
+    backpacks: [max_tracked_backpacks][3]i32 = @splat(.{ 0, 0, 0 }),
     backpack_n: u8 = 0,
     /// True from the moment a death produced a bag until the player respawns.
     /// One death must not produce two bags (the C2S kill path and the
@@ -902,7 +902,7 @@ pub const Client = struct {
     /// `onSelfEquipStop` rows and the new item's `onSelfEquipStart` rows; a
     /// quality change fires `onSelfEquipUpdate` (tier-curved cvars). Zeroed
     /// on slot clear.
-    equip_seen: [ecs.components.inv_equip_count]EquipSeen = [_]EquipSeen{.{}} ** ecs.components.inv_equip_count,
+    equip_seen: [ecs.components.inv_equip_count]EquipSeen = @splat(.{}),
     /// Last-tick held item (id + quality + mods), for the same reconcile on
     /// the held weapon: installed mods' equip rows (proc cvars) seed here.
     held_seen: EquipSeen = .{},

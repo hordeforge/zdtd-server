@@ -216,7 +216,7 @@ test "noise scan survives a self-closing node and matches tags case-insensitivel
     try std.testing.expectEqual(@as(f32, 5), loud.heat_map_strength);
     // Over-long / empty claims cannot be group keys.
     try std.testing.expect(t.getClip("") == null);
-    try std.testing.expect(t.getClip("x" ** (max_clip_name + 1)) == null);
+    try std.testing.expect(t.getClip(&@import("../util/root.zig").repeat("x", (max_clip_name + 1))) == null);
 }
 
 test "load sounds.xml noise table when present" {

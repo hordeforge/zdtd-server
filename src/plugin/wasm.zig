@@ -141,10 +141,10 @@ pub const HostCtx = struct {
     /// Runtime pointers of loaded instances, 1:1 with WasmHost slots. The
     /// queue import matches Caller.rt against this table to attribute a queued
     /// command to its plugin (slot index + 1; 0 = unattributed).
-    rt_slot: [max_wasm_plugins]?*anyopaque = .{null} ** max_wasm_plugins,
+    rt_slot: [max_wasm_plugins]?*anyopaque = @splat(null),
     /// Plugin pointers, 1:1 with rt_slot: lets the host imports (std.json
     /// capability) reach a loaded plugin's per-instance state from a Caller.
-    plugin_slot: [max_wasm_plugins]?*anyopaque = .{null} ** max_wasm_plugins,
+    plugin_slot: [max_wasm_plugins]?*anyopaque = @splat(null),
 };
 
 pub const LoadError = error{
@@ -199,7 +199,7 @@ pub const Plugin = struct {
     /// swapped on disk to drop `_zdtd_requires` must not load here and then be
     /// refused on the next restart.
     require_declaration: bool = false,
-    hook_present: [@typeInfo(Hook).@"enum".fields.len]bool = .{false} ** @typeInfo(Hook).@"enum".fields.len,
+    hook_present: [@typeInfo(Hook).@"enum".fields.len]bool = @splat(false),
     /// Declarative dependency check (paper: reactive coeffects): `_zdtd_requires`
     /// returns a comma-separated list of capabilities (hook names + host verbs
     /// log/tick/queue/sense/query). Unknown or missing capabilities fail the
@@ -1049,10 +1049,10 @@ pub const WasmHost = struct {
     budget: Budget = .{},
     /// Pending-effect withdrawal marks: a disabled plugin's queued commands are
     /// dropped once (temporal composability); cleared on reload.
-    withdrawn: [max_wasm_plugins]bool = .{false} ** max_wasm_plugins,
+    withdrawn: [max_wasm_plugins]bool = @splat(false),
     /// PRD 0005: exclusive core override-point claims, point -> slot (load-fixed;
     /// no_claim when unclaimed). A claimed point routes only to its claimant.
-    claims: [manifest.OverridePoint.count]u8 = .{no_claim} ** manifest.OverridePoint.count,
+    claims: [manifest.OverridePoint.count]u8 = @splat(no_claim),
 
     /// Load through a resolved mod plan (PRD 0005): the plan is final load
     /// order with tiers and exclusive point claims; the caller owns the plan
@@ -1073,7 +1073,7 @@ pub const WasmHost = struct {
         // by PLAN index. Binding a claim by plan index would name whichever
         // module happened to land in that slot (whose hook_present may pass),
         // or a slot >= self.n that claimSlot voids forever.
-        var slot_of_plan: [max_wasm_plugins]u8 = .{no_claim} ** max_wasm_plugins;
+        var slot_of_plan: [max_wasm_plugins]u8 = @splat(no_claim);
         for (plan.modules) |rm| {
             if (self.n >= max_wasm_plugins) {
                 std.debug.print("zdtd: wasm plugin cap {d} reached; skipping '{s}'\n", .{ max_wasm_plugins, rm.manifest.wasm.? });
@@ -1178,7 +1178,7 @@ pub const WasmHost = struct {
         // a claimant that does not export its hook keeps the claim off the
         // table and reaches the ordinary composition loop instead, which
         // degrades exactly the way an unloaded claimant does.
-        self.claims = .{no_claim} ** manifest.OverridePoint.count;
+        self.claims = @splat(no_claim);
         var it = plan.point_claims.iterator();
         while (it.next()) |entry| {
             const point = manifest.OverridePoint.parsePoint(entry.key_ptr.*) orelse continue;
@@ -1746,11 +1746,11 @@ pub const WasmHost = struct {
             self.slots[i].deinit();
         }
         self.n = 0;
-        self.withdrawn = .{false} ** max_wasm_plugins;
-        self.claims = .{no_claim} ** manifest.OverridePoint.count;
+        self.withdrawn = @splat(false);
+        self.claims = @splat(no_claim);
         if (self.ctx) |ctx| {
-            ctx.rt_slot = .{null} ** max_wasm_plugins;
-            ctx.plugin_slot = .{null} ** max_wasm_plugins;
+            ctx.rt_slot = @splat(null);
+            ctx.plugin_slot = @splat(null);
         }
     }
 

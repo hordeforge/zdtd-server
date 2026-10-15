@@ -203,5 +203,24 @@ pub fn handleTrigger(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const
         try self.broadcastExcept("NetPackageWaterSet", relay, c.slot);
         return true;
     }
+    if (std.mem.eql(u8, name, "NetPackageAnimateBlock")) {
+        // Stock ProcessPackage is client-only (NetPackageAnimateBlock.il.txt:106):
+        // the server's job is to fan the body out. The body is not rebuilt, so
+        // a parse only proves it carries blockPosition, animParamater, animType,
+        // animationInteger and animationBool before it is relayed unchanged.
+        if (!self.takeBlockToken(c)) {
+            self.harness.counters.inc(.c2s_throttle);
+            return true;
+        }
+        var name_buf: [64]u8 = undefined;
+        const wire_len = packages.parseAnimateBlockBody(body, &name_buf) catch {
+            self.harness.counters.inc(.c2s_malformed);
+            return true;
+        };
+        // Forward only the bytes the parser consumed, matching the other
+        // relays: a client must not append bytes and have them fanned out.
+        try self.broadcastExcept("NetPackageAnimateBlock", body[0..wire_len], c.slot);
+        return true;
+    }
     return false;
 }

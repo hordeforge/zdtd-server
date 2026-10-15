@@ -222,7 +222,7 @@ test "length prefix longer than the body is EndOfStream" {
 test "id longer than the read buffer is rejected, not truncated" {
     var buf: [128]u8 = undefined;
     var w: binary.Writer = .{ .buf = &buf };
-    const long_id = "x" ** (max_id_len + 1);
+    const long_id = &@import("../util/root.zig").repeat("x", (max_id_len + 1));
     try write(&w, .{ .platform = "Steam", .id = long_id });
     var plat: [max_platform_len]u8 = undefined;
     var id: [max_id_len]u8 = undefined;
@@ -247,15 +247,15 @@ test "Stored holds, compares and clears identities" {
     // Same id on a different platform is a different account.
     try std.testing.expect(!s.matches(.{ .platform = "Steam", .id = "abc" }));
 
-    try std.testing.expectError(error.Overflow, s.set(.{ .platform = "EOS", .id = "y" ** (max_id_len + 1) }));
+    try std.testing.expectError(error.Overflow, s.set(.{ .platform = "EOS", .id = &@import("../util/root.zig").repeat("y", (max_id_len + 1)) }));
     try s.set(null);
     try std.testing.expect(s.get() == null);
 }
 
 test "max-length platform and id survive storage" {
     var s: Stored = .{};
-    const plat = "P" ** max_platform_len;
-    const id = "I" ** max_id_len;
+    const plat = &@import("../util/root.zig").repeat("P", max_platform_len);
+    const id = &@import("../util/root.zig").repeat("I", max_id_len);
     try s.set(.{ .platform = plat, .id = id });
     const got = s.get().?;
     try std.testing.expectEqualStrings(plat, got.platform);

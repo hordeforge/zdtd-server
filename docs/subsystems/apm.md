@@ -63,7 +63,7 @@ The array and its operations (src/apm/metrics.zig:159-179):
 
 ```zig
 pub const Counters = struct {
-    values: [counters_len]u64 = .{0} ** counters_len,
+    values: [counters_len]u64 = @splat(0),
 
     pub fn add(self: *Counters, id: CounterId, n: u64) void {
         const i: usize = @intFromEnum(id);
@@ -105,8 +105,8 @@ pub const Section = enum(u8) {
 
 ```zig
 pub const Profiler = struct {
-    hist: [sections_len]metrics.LatencyHist = [_]metrics.LatencyHist{.{}} ** sections_len,
-    open: [sections_len]?u64 = [_]?u64{null} ** sections_len,
+    hist: [sections_len]metrics.LatencyHist = @splat(.{}),
+    open: [sections_len]?u64 = @splat(null),
 
     /// Raw begin/end are not Tracy-mapped: Tracy validates strict LIFO nesting
     /// per thread, which only `scope`/`Scope.end` guarantees. Use `scope`.
@@ -145,7 +145,7 @@ Latency buckets are a fixed log2 histogram in nanoseconds, one `u64` per power o
 /// Fixed log2 histogram for latency in nanoseconds (power-of-two buckets).
 /// Bucket k covers [2^k, 2^(k+1)) ns for k in 0..63.
 pub const LatencyHist = struct {
-    buckets: [64]u64 = .{0} ** 64,
+    buckets: [64]u64 = @splat(0),
     count: u64 = 0,
     sum_ns: u64 = 0,
     max_ns: u64 = 0,

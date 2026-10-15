@@ -188,7 +188,7 @@ test "unique_only group picks distinct refs" {
     var rng = rng_util.XorShift32.init(5);
     const n = t.rollAllRefs(&refs, &rng, .{}, 1.0, &out);
     try std.testing.expect(n >= 3);
-    var seen: [3]bool = .{false} ** 3;
+    var seen: [3]bool = @splat(false);
     for (out[0..n]) |r| {
         if (std.mem.eql(u8, r.name, "modA")) seen[0] = true;
         if (std.mem.eql(u8, r.name, "modB")) seen[1] = true;
@@ -203,9 +203,7 @@ test "modsToInstall rolls with the descending chance halving after each install"
     // halve the chance. A 1.0 chance installs every requested mod in order;
     // the names stay unresolved here because the TraderTable has no item table.
     const refs = [_]ItemRef{
-        .{ .name = "gunA", .quality_lo = 1, .quality_hi = 6,
-           .mods_to_install = &.{ "modScope", "modBarrel", "modStock" },
-           .mod_chance = 1.0 },
+        .{ .name = "gunA", .quality_lo = 1, .quality_hi = 6, .mods_to_install = &.{ "modScope", "modBarrel", "modStock" }, .mod_chance = 1.0 },
         .{ .name = "ammoA", .count_min = 1, .count_max = 1 },
     };
     const quality_names = TestQualityNames{ .names = &.{"gunA"} };

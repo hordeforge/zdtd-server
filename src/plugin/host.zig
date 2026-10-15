@@ -9,7 +9,7 @@ pub const max_plugins: usize = 8;
 pub const PluginHost = struct {
     slots: [max_plugins]*const api.PluginVTable = undefined,
     n: usize = 0,
-    enabled: [max_plugins]bool = .{false} ** max_plugins,
+    enabled: [max_plugins]bool = @splat(false),
     view: api.Host = .{},
 
     pub fn register(self: *PluginHost, plugin: *const api.PluginVTable) bool {
@@ -331,11 +331,11 @@ test "host gameEvent verdict: deny and keep first-wins" {
 }
 
 // Test capture (module scope: the nested vtable fn cannot close over locals).
-var stat_last: [7]i32 = .{0} ** 7;
+var stat_last: [7]i32 = @splat(0);
 
 test "host stat-changed observer fires with the player snapshot" {
     var h: PluginHost = .{};
-    stat_last = .{0} ** 7;
+    stat_last = @splat(0);
     const obs = api.PluginVTable{
         .name = "statobs",
         .on_stat_changed = struct {
@@ -356,7 +356,7 @@ test "host stat-changed observer fires with the player snapshot" {
 
 // Test capture for the buff observer (module scope, same reason).
 var buff_last_entity: i32 = 0;
-var buff_last_name: [32]u8 = .{0} ** 32;
+var buff_last_name: [32]u8 = @splat(0);
 var buff_last_name_len: usize = 0;
 var buff_last_adding: bool = false;
 var buff_calls: u32 = 0;
@@ -392,11 +392,11 @@ test "host buff observer fires for both directions" {
 }
 
 // Test capture for the evidence observer (module scope, same reason).
-var ev_last: [8]i32 = .{0} ** 8;
+var ev_last: [8]i32 = @splat(0);
 
 test "host evidence observer fires with the guard event (T21)" {
     var h: PluginHost = .{};
-    ev_last = .{0} ** 8;
+    ev_last = @splat(0);
     const obs = api.PluginVTable{
         .name = "evobs",
         .on_evidence = struct {

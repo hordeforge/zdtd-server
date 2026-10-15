@@ -154,24 +154,24 @@ Parse-side entry points live in the same modules as their builders, with the sam
 
 Two structural decisions inside that set are worth naming. Identifier wire is single-form because the five stock subtypes share an empty custom-data tail, so a flat `present | version | platform | id` covers all of them (`src/wire/platform_user.zig:37`). The deco record is 17 bytes, not the stock `decoSize` literal `0x10`, which is declared and never referenced in the assembly (`src/wire/stock_deco.zig:28`).
 
-The named shapes commonly inspected while changing this subsystem. First, the encoded slot record (`src/wire/stock_inv.zig:45`, comments trimmed here):
+The named shapes commonly inspected while changing this subsystem. First, the encoded slot record (`src/wire/stock_inv.zig:52`, comments trimmed here):
 
 ```zig
 pub const StockSlot = struct {
+    /// Absolute ItemValue.type (block id < items_start_here, or items_start_here + item index).
+    /// Prefer encodeItemType() helpers for item classes.
     type_id: i32 = 0,
     count: u16 = 0,
     quality: u16 = 0,
     meta: u16 = 0,
     use_times: f32 = 0,
     seed: u16 = 0,
+    /// ItemValue.Flags byte (V3.2.0, changelog-3.2.0 §3.4): bit 0 =
+    /// Activated (the old byte field), bit 1 = WasCombined. Same wire
+    /// position/width, so the byte plumbing is unchanged.
     flags: u8 = 0,
-    ammo_index: u8 = 0,
-    mods: [4]u16 = .{0} ** 4,
-    mod_n: u8 = 0,
-    mod_qualities: [4]u8 = .{0} ** 4,
-    stats: [max_item_stats]StatEntry = .{StatEntry{}} ** max_item_stats,
-    stats_n: u8 = 0,
-};
+    /// The item's `charge` metadata (ItemValue typed metadata, the value stock's
+    /// `SetItemMetaFloat key="charge"` rows write and `CompareItemMetaFloat`
 ```
 
 The matching wire widths are pinned at compile time against the ECS subset (`src/wire/stock_inv.zig:36`): toolbelt 10, bag 45, equipment 12 (`src/wire/stock_inv.zig:23`, `src/wire/stock_inv.zig:30`, `src/wire/stock_inv.zig:33`). The deco object record (`src/wire/stock_deco.zig:59`):

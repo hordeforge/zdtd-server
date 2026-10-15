@@ -23,7 +23,7 @@ pub const Rule = struct {
     /// Slow, Slow, Normal, Fast, Very Fast (stock `BiomeSpawningFromXml`
     /// IL_015D-0192 splits on comma and scales each by 24000 world ticks).
     /// Short lists pad with the first element; absent = 1 day.
-    respawn_days: [6]f32 = [_]f32{1.0} ** 6,
+    respawn_days: [6]f32 = @splat(1.0),
     /// Comma list of POI tags: the rule only fires where the area's POI tags
     /// contain any of these (stock POITags.Test_AnySet, spawning.md §2).
     tags: []const u8 = "",
@@ -113,7 +113,7 @@ fn parseKind(s: ?[]const u8) SpawnKind {
 /// (the index side guards the length). Empty slots pad with the first
 /// element so a 1-element list behaves like the old Default-only read.
 fn respawnDaysList(s: []const u8) [6]f32 {
-    var out: [6]f32 = [_]f32{1.0} ** 6;
+    var out: [6]f32 = @splat(1.0);
     var n: usize = 0;
     var it = std.mem.splitScalar(u8, s, ',');
     while (it.next()) |part| {

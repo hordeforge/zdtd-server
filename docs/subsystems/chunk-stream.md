@@ -16,15 +16,15 @@ Join calls `sendSpawnArea` from two C2S phases, the pre-spawn `DynamicClientArri
 
 The queue is a flat membership array plus a count, sized by a compile-time cap, with the spawn-area drain cursor and a once-only capacity warning as the rest of the per-client stream state.
 
-The streamed set and view radius (`src/server/game/types.zig:628-633`):
+The streamed set and view radius (`src/server/game/types.zig:269`):
 
 ```zig
     view_radius: i32 = default_view_radius,
-    name: [32]u8 = .{0} ** 32,
-    name_len: usize = 0,
-    /// Chunk keys currently known streamed to this client (WorldChunkCache keys).
-    streamed: [max_streamed_chunks_cap]i64 = undefined,
-    streamed_n: usize = 0,
+    /// `ServerMaxAllowedViewDistance` (GamePrefs 190): the ceiling on a joining
+    /// client's requested chunk view, stock-clamped into 4..12.
+    server_max_view_distance: i32 = 12,
+    /// `ServerLoginConfirmationText` (GameInfoString 11) and `ServerVisibility`
+    /// (GameInfoInt 43) for the TCP server-info string.
 ```
 
 The drain cursor (`src/server/game/types.zig:617-621`):
@@ -85,7 +85,7 @@ pub const default_chunk_adds_per_stream_tick: u32 = 8;
 
 Further named constants: `default_chunk_stream_period_ticks = 5` (`src/server/game/types.zig:79`), `default_spawn_area_radius_max = 8` (`src/server/game/types.zig:79`), `default_view_radius = 7` (`src/server/game/types.zig:79`), `default_te_scan_block_cap = 32` and `default_te_scan_te_cap = 48` (`src/server/game/types.zig:43-44`). The join ACK yield is `join_ack_yield_ns = 500_000` (`src/server/game/chunk_stream.zig:33`). The compile cap is `max_streamed_chunks_cap = 625` (`src/server/zdtd_config.zig:486`), a 25x25 square sized for the stock client's view distance 12 request.
 
-The per-instance values are `Game` fields filled from `zdtd.toml` (`src/server/game.zig:715-719`):
+The per-instance values are `Game` fields filled from `zdtd.toml` (`src/server/game.zig:711`):
 
 ```zig
     max_streamed_chunks: usize = default_max_streamed_chunks,

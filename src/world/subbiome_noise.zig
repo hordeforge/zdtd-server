@@ -225,7 +225,7 @@ test "subBiomeIdx resolves the stock noise windows" {
     var p = PerlinNoise.init(stableHash("Navezgane"));
     // Deterministic per cell.
     var x: i32 = 0;
-    var hits: [4]u32 = .{0} ** 4;
+    var hits: [4]u32 = @splat(0);
     while (x < 500) : (x += 1) {
         const idx = subBiomeIdx(&p, &subs, x, @divTrunc(x, 2));
         try std.testing.expect(idx >= -1 and idx < 3);

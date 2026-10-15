@@ -281,7 +281,7 @@ pub fn savePlayers(self: *Game) !void {
                     qp += 10;
                     var qname: []const u8 = "";
                     var qpoi_valid: u8 = 0;
-                    var qrect: [24]u8 = [_]u8{0} ** 24;
+                    var qrect: [24]u8 = @splat(0);
                     var qobj_n: usize = 0;
                     if (old_version >= 5) {
                         if (qp >= off) break;

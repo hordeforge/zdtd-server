@@ -1610,7 +1610,7 @@ test "SpawnGSEnemy action fires gamestage-scaled spawns on phase entry" {
         .{ .kind = .kill_zombies, .required = 1 },
         .{ .kind = .trader_interact, .required = 1 },
     };
-    const actions = [_]quest.QuestActionSpec{.{ .kind = .spawn_gs_enemy, .phase = 2, .name = "SleeperGSList", .count_min = 1, .count_max = 2 }} ** quest.max_actions;
+    const actions: [quest.max_actions]quest.QuestActionSpec = @splat(.{ .kind = .spawn_gs_enemy, .phase = 2, .name = "SleeperGSList", .count_min = 1, .count_max = 2 });
     const defs = [_]quest.QuestDef{.{
         .id = 64,
         .kind = .kill_zombies,

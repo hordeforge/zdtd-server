@@ -64,7 +64,7 @@ pub const CVar = struct {
 
 /// A fixed-capacity name -> f32 map for one entity.
 pub const Set = struct {
-    entries: [max_cvars]CVar = [_]CVar{.{}} ** max_cvars,
+    entries: [max_cvars]CVar = @splat(.{}),
     n: u8 = 0,
     /// Writes dropped because the store was full (an instrumented bound, never
     /// a silent truncation).

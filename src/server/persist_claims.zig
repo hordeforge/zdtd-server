@@ -59,7 +59,7 @@ pub fn loadClaims(self: *Game) !void {
         const z = std.mem.readInt(i32, data[o + 8 ..][0..4], .little);
         const name_len = data[o + 12];
         if (name_len > 32) return error.BadRecord;
-        var name: [32]u8 = .{0} ** 32;
+        var name: [32]u8 = @splat(0);
         @memcpy(name[0..name_len], data[o + 13 ..][0..name_len]);
         const seen = std.mem.readInt(u32, data[o + 45 ..][0..4], .little);
         o += 49;

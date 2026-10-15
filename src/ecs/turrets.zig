@@ -239,17 +239,17 @@ pub fn turretOwner(value: u32) i16 {
 pub const TurretTick = struct {
     kills: u32 = 0,
     /// Dead zombie net ids (for S2C EntityRemove).
-    killed_ids: [16]i32 = .{-1} ** 16,
+    killed_ids: [16]i32 = @splat(-1),
     killed_n: u8 = 0,
     /// Owner client slot per kill (parallel to killed_ids; -1 unowned).
-    owner_slots: [16]i16 = .{-1} ** 16,
-    loot_bag_ids: [16]i32 = .{-1} ** 16,
+    owner_slots: [16]i16 = @splat(-1),
+    loot_bag_ids: [16]i32 = @splat(-1),
     loot_n: u8 = 0,
 };
 
 pub fn systemTurrets(w: *World, dt: f32) TurretTick {
     if (w.countKind(.turret) == 0) return .{};
-    var dmg_fp: [max_entities]u32 = .{0} ** max_entities;
+    var dmg_fp: [max_entities]u32 = @splat(0);
     // Filtered copy of the cached zombie group (ascending, so target selection
     // ties break identically to the old full scan). The parallel workers below
     // never spawn or destroy, so the slice stays valid for the whole phase.
@@ -261,14 +261,14 @@ pub fn systemTurrets(w: *World, dt: f32) TurretTick {
         zn += 1;
     }
     // One O(node_n) pass here replaces an O(node_n) scan per turret per tick.
-    var powered: [max_entities]bool = .{false} ** max_entities;
+    var powered: [max_entities]bool = @splat(false);
     var ni: usize = 0;
     while (ni < w.power.node_n) : (ni += 1) {
         const node = &w.power.nodes[ni];
         if (!node.powered or node.entity_id < 0) continue;
         if (w.slotOfNetId(node.entity_id)) |ps| powered[ps] = true;
     }
-    var owner_hit: [max_entities]u32 = .{0} ** max_entities;
+    var owner_hit: [max_entities]u32 = @splat(0);
     var turret_slots: [max_entities]Slot = undefined;
     const tn = query.copyKindInto(w, .turret, &turret_slots);
     const ctx = TurretCtx{ .w = w, .dt = dt, .dmg_fp = dmg_fp[0..], .zombies = zombie_slots[0..zn], .turrets = turret_slots[0..tn], .powered = &powered, .owner_hit = owner_hit[0..] };

@@ -104,7 +104,7 @@ pub const Collector = struct {
 
 pub const Store = struct {
     items: [max_collectors]Collector = undefined,
-    used: [max_collectors]bool = .{false} ** max_collectors,
+    used: [max_collectors]bool = @splat(false),
 
     pub fn get(self: *Store, x: i32, y: i32, z: i32) ?*Collector {
         for (self.items[0..], self.used[0..]) |*c, u| {

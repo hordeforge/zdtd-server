@@ -37,7 +37,7 @@ const stock_terr_stone = stock_chunk.stock_terr_stone;
 const water_mass_full = stock_chunk.water_mass_full;
 
 test "stock chunk encodes non-empty terrain" {
-    var heights: [256]u8 = .{60} ** 256;
+    var heights: [256]u8 = @splat(60);
     var buf: [65536]u8 = undefined;
     const body = try buildNetPackageChunkNew(&buf, .{
         .cx = -18,
@@ -70,7 +70,7 @@ test "a uniform non-air layer writes the presence bool before the shared value" 
             return if (y < 4) stock_terr_bedrock else stock_air;
         }
     };
-    var heights: [256]u8 = .{0} ** 256;
+    var heights: [256]u8 = @splat(0);
     var raw: [524288]u8 = undefined;
     const payload = try encodeNetworkChunk(&raw, .{
         .cx = 0,
@@ -86,7 +86,7 @@ test "a uniform non-air layer writes the presence bool before the shared value" 
 }
 
 test "stock chunk empty sky is smaller" {
-    var heights: [256]u8 = .{0} ** 256;
+    var heights: [256]u8 = @splat(0);
     var buf: [65536]u8 = undefined;
     const body = try buildNetPackageChunkNew(&buf, .{
         .cx = 0,
@@ -98,7 +98,7 @@ test "stock chunk empty sky is smaller" {
 }
 
 test "stock chunk per-cell biome changes wire and is deterministic" {
-    var heights: [256]u8 = .{60} ** 256;
+    var heights: [256]u8 = @splat(60);
     // Separate buffers: encodeNetworkChunk returns a slice into its caller
     // buffer, so sharing one buffer would alias later writes over earlier views.
     var buf_a: [65536]u8 = undefined;
@@ -142,12 +142,12 @@ test "stock chunk per-cell biome changes wire and is deterministic" {
 }
 
 test "dominantOf picks most common biome id with first-max ties" {
-    var biomes: [256]u8 = .{1} ** 256;
+    var biomes: [256]u8 = @splat(1);
     @memset(biomes[240..], 5);
     try std.testing.expectEqual(@as(u8, 1), dominantOf(&biomes, 3));
-    var all_zero: [256]u8 = .{0} ** 256;
+    var all_zero: [256]u8 = @splat(0);
     try std.testing.expectEqual(@as(u8, 0), dominantOf(&all_zero, 3));
-    var tie: [256]u8 = .{0} ** 256;
+    var tie: [256]u8 = @splat(0);
     @memset(tie[128..], 9); // 128×0, 128×9: first maximum (0) wins
     try std.testing.expectEqual(@as(u8, 0), dominantOf(&tie, 3));
 }
@@ -163,7 +163,7 @@ test "stock chunk emits per-block textureFull for painted blocks" {
             return if (y >= 1 and y <= 60) 0x61 else 0;
         }
     };
-    var heights: [256]u8 = .{60} ** 256;
+    var heights: [256]u8 = @splat(60);
     var raw: [524288]u8 = undefined;
     const payload = try encodeNetworkChunk(&raw, .{
         .cx = 0,
@@ -206,7 +206,7 @@ test "stock chunk water channel carries full mass for water cells" {
             return stock_air;
         }
     };
-    var heights: [256]u8 = .{60} ** 256;
+    var heights: [256]u8 = @splat(60);
     var raw_w: [524288]u8 = undefined;
     var raw_d: [524288]u8 = undefined;
     const water = try encodeNetworkChunk(&raw_w, .{
@@ -247,7 +247,7 @@ test "stock chunk emits upper24 for construction ids >= 256" {
             return if (y == 0) stock_terr_bedrock else if (y <= 60) 1000 else stock_air;
         }
     };
-    var heights: [256]u8 = .{60} ** 256;
+    var heights: [256]u8 = @splat(60);
     var raw: [262144]u8 = undefined;
     const payload = try encodeNetworkChunk(&raw, .{
         .cx = 0,
@@ -270,7 +270,7 @@ test "stock chunk emits upper24 for construction ids >= 256" {
 
 test "stock chunk surface density mixed band has both values" {
     // Height 60 → layer 15 (y 60..63) is mixed solid/air; payload must exceed all-same path.
-    var heights: [256]u8 = .{60} ** 256;
+    var heights: [256]u8 = @splat(60);
     var buf: [131072]u8 = undefined;
     const body = try buildNetPackageChunkNew(&buf, .{
         .cx = 0,
@@ -372,7 +372,7 @@ test "topsoil bitfield rides the chunk wire (stock m_bTopSoilBroken)" {
             return null;
         }
     }.f;
-    var heights: [256]u8 = .{60} ** 256;
+    var heights: [256]u8 = @splat(60);
     var buf: [131072]u8 = undefined;
     // Fresh world: the topsoil bytes after the maps run are clear
     // (splat-rendered).
@@ -387,7 +387,7 @@ test "topsoil bitfield rides the chunk wire (stock m_bTopSoilBroken)" {
     for (fresh_top) |b| try std.testing.expectEqual(@as(u8, 0), b);
     // Disturbed columns (dig at (0,0) + columns 56..63): the same window now
     // carries the bitfield; everything else stays identical.
-    var ts: [32]u8 = [_]u8{0} ** 32;
+    var ts: [32]u8 = @splat(0);
     ts[0] = 0x01;
     ts[7] = 0xFF;
     const dist = try encodeNetworkChunk(&buf, .{
@@ -406,12 +406,12 @@ test "topsoil bitfield rides the chunk wire (stock m_bTopSoilBroken)" {
 }
 
 test "simd layerIsUniform and anyNonAir" {
-    var u8s: [1024]u8 = .{7} ** 1024;
+    var u8s: [1024]u8 = @splat(7);
     try std.testing.expect(layerIsUniformU8(&u8s));
     u8s[1000] = 8;
     try std.testing.expect(!layerIsUniformU8(&u8s));
 
-    var raws: [1024]u32 = .{stock_air} ** 1024;
+    var raws: [1024]u32 = @splat(stock_air);
     try std.testing.expect(!layerAnyNonAirU32(&raws));
     try std.testing.expect(layerIsUniformU32(&raws));
     raws[17] = stock_terr_dirt;
@@ -525,7 +525,7 @@ test "dens_at always-null callback matches dens_at null encode (SIMD path)" {
     // chunk_fill.zig passes dens_at = null when the chunk has no densities
     // plane. This pins that the always-null-callback scalar density loop and
     // the SIMD packDensityFromRaws path produce identical wire bytes.
-    var heights: [256]u8 = .{60} ** 256;
+    var heights: [256]u8 = @splat(60);
     var plane: [stock_plane_cells]u32 = undefined;
     var i: usize = 0;
     while (i < plane.len) : (i += 1) {
@@ -605,7 +605,7 @@ test "simd packU16Plane and fillWaterMassFromRaws match scalar" {
     }
 
     const water_id: u16 = 240;
-    var raws: [1024]u32 = .{0} ** 1024;
+    var raws: [1024]u32 = @splat(0);
     raws[0] = water_id;
     raws[17] = @as(u32, water_id) | (@as(u32, 2) << 16);
     raws[1000] = 1; // stone
@@ -624,10 +624,10 @@ test "simd packU16Plane and fillWaterMassFromRaws match scalar" {
 
 test "simd density channel with dens_plane overlay matches dens_at scalar" {
     // POI path: raws + TTS dens_plane/dens_set must match dens_at callback bytes.
-    var heights: [256]u8 = .{60} ** 256;
+    var heights: [256]u8 = @splat(60);
     var plane: [stock_plane_cells]u32 = undefined;
-    var dens_plane: [stock_plane_cells]u8 = .{0} ** stock_plane_cells;
-    var dens_set: [stock_dens_set_bytes]u8 = .{0} ** stock_dens_set_bytes;
+    var dens_plane: [stock_plane_cells]u8 = @splat(0);
+    var dens_set: [stock_dens_set_bytes]u8 = @splat(0);
     var i: usize = 0;
     while (i < plane.len) : (i += 1) {
         const lx: i32 = @intCast(i % 16);
@@ -686,7 +686,7 @@ test "simd density channel with dens_plane overlay matches dens_at scalar" {
 
 test "simd density channel with raws plane matches dens_at-less scalar encode" {
     // Full memoized raw plane: SIMD density path must match callback-only encode.
-    var heights: [256]u8 = .{60} ** 256;
+    var heights: [256]u8 = @splat(60);
     var plane: [stock_plane_cells]u32 = undefined;
     var i: usize = 0;
     while (i < plane.len) : (i += 1) {
@@ -725,7 +725,7 @@ test "simd density channel with raws plane matches dens_at-less scalar encode" {
 
 test "raws_scratch memo reaches density channel (SIMD path)" {
     // raws_scratch alone must fill opts_memo.raws so density/water see the plane.
-    var heights: [256]u8 = .{55} ** 256;
+    var heights: [256]u8 = @splat(55);
     var scratch: [stock_plane_cells]u32 = undefined;
     var buf_scratch: [131072]u8 = undefined;
     var buf_raws: [131072]u8 = undefined;
@@ -758,7 +758,7 @@ test "raws_scratch memo reaches density channel (SIMD path)" {
 
 test "simd encode matches mixed height chunk length class" {
     // Regression: SIMD pack path still produces valid mixed density payload.
-    var heights: [256]u8 = .{60} ** 256;
+    var heights: [256]u8 = @splat(60);
     var raw: [131072]u8 = undefined;
     const payload = try encodeNetworkChunk(&raw, .{
         .cx = 0,

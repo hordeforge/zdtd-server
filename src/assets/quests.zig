@@ -542,12 +542,12 @@ fn parseQuestDefBody(
     }
 
     const obj_count = countTags(body, "<objective");
-    var reward_has_item: [quest.max_reward_flags]bool = .{false} ** quest.max_reward_flags;
-    var reward_specs: [quest.max_reward_flags]quest.RewardSpec = [_]quest.RewardSpec{.{}} ** quest.max_reward_flags;
+    var reward_has_item: [quest.max_reward_flags]bool = @splat(false);
+    var reward_specs: [quest.max_reward_flags]quest.RewardSpec = @splat(.{});
     const rew_count = parseRewardKinds(arena, body, &reward_has_item, &reward_specs);
-    var action_specs: [quest.max_actions]quest.QuestActionSpec = [_]quest.QuestActionSpec{.{}} ** quest.max_actions;
+    var action_specs: [quest.max_actions]quest.QuestActionSpec = @splat(.{});
     const act_count = parseActions(arena, body, &action_specs);
-    var event_specs: [quest.max_quest_events]quest.QuestEventSpec = [_]quest.QuestEventSpec{.{}} ** quest.max_quest_events;
+    var event_specs: [quest.max_quest_events]quest.QuestEventSpec = @splat(.{});
     const ev_count = parseQuestEvents(arena, body, &event_specs);
 
     const graph = try buildPhaseGraph(arena, body, tier, kinds, policy);

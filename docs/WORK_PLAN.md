@@ -36,11 +36,12 @@ severity ceiling (client-informed detectors fail closed to .strong, counted),
 T21 the on_evidence guest observer, T22 void-rescue suppression, T23 the
 guardreport dry-run diff verb. The remaining T18 core (server-sanctioned
 grants / a full stock-transaction ledger) stays recorded in the task text.
-Still open / recorded, not wired: T30 (drone companion - zero stock AITask
-uses). Partly landed 2026-10-03: the entity, session spawn, owner-tagged ECD,
-follow tick, map marker, console verbs and session teardown ship (STATUS, drone
-steps 1-6); the states (sentry/attack/heal) and orders wait on the interaction
-mirror package this RE set does not name, and on the weapon/storage layer. T38 (always-on radius effects) shipped 2026-08-26; T35
+Still open / recorded, not wired: T30 heal. The ally is a party member
+(`ecs/party.zig`), but `HealBeamWeapon.Fire` (IL=184) consumes a stored
+medical item and zdtd has no drone bag, so the heal has nothing to spend.
+Landed 2026-10-12: sentry and shutdown hold, attack stuns the nearest enemy
+within 22 m, and the vomit block hit folds the ammo's tagged DamageModifier
+rows. Orders stay blocked: the RE names no C2S package for them. T38 (always-on radius effects) shipped 2026-08-26; T35
 (air-drop marker) resolved 2026-08-26 (the entity-tied marker dies with the
 bag's EntityRemove). The per-task "Why" text below is historical; GAP/STATUS
 win on conflict.
@@ -253,20 +254,7 @@ the gate and policy layer, and ADR 0022 keeps guests out of both.
 
 ## T22. Attribution and suppression
 
-**Status: landed 2026-10-06.** Suppression is real: the void-rescue path (`move_position.zig:25`, `move_state.zig:132`) resets the movement envelope so the server correction is not counted as a movement reject against a legit player, with the reason recorded in the code. **Still open: the attribution half** - every `noteEvidence` call site passes
-`peer.local_id`, the reporting peer, so a finding induced by a second player
-does not attribute to the inducer. **2026-10-06 survey:** the eight call
-sites are all self-claims (the reporter *is* the inducer) except the
-shove-off-a-roof case the `Why` names, which is a movement finding on the
-shoved player. The fix is an `inducer` parameter on `noteEvidence`
-(`src/server/game/guard.zig:80`) plus a source for it: the last attacker,
-which the combat path already knows (`misc_damage.zig` `actor_slot`). Do
-not attribute on a guess - a wrong inducer is worse than none. **Landed:**
-`inducer` rides `noteEvidence` and the `Event` record (JSONL `ind`),
-`Player.last_attacker_id` is set on every landed hit
-(`misc_damage.zig:182`), and the movement finding attributes to it when
-the player is in combat (`movement_helpers.zig:108`) - the shove case the
-`Why` names.
+**Status: landed 2026-10-06.** Suppression is real: the void-rescue path (`move_position.zig:25`, `move_state.zig:132`) resets the movement envelope so the server correction is not counted as a movement reject against a legit player, with the reason recorded in the code. Attribution landed the same day: `inducer` rides `noteEvidence` and the `Event` record (JSONL `ind`), `Player.last_attacker_id` is set on every landed hit (`misc_damage.zig:182`), and the movement finding attributes to it when the player is in combat (`movement_helpers.zig:108`) - the shove case the `Why` names. The other call sites are self-claims, so they pass `-1` (the reporter is the inducer). A wrong inducer is worse than none, so nothing attributes on a guess.
 **Why:** ADR 0022 decision 7. Without these two rules the anti-cheat becomes a
 grief weapon: a player who can shove someone off a roof farms movement findings
 against them, which is a worse outcome than the cheat being caught.
@@ -677,7 +665,7 @@ AI, not the client display of it.
 
 ## T30. Drone companion AI (`EntityDrone`)
 
-**Status: landed 2026-10-06 (machine + wire); steering remains.** The 9-state premise re-verified 2026-10-06. `../../7dtd-engine-research/docs/entities/raycast-pathing.md:471-479` tables all 9 (`Idle`0/`Sentry`1/`Follow`2/`Heal`3/`Attack`4/`Shutdown`5/`NoClip`6/`Teleport`7/`None`8), matching this task. zdtd has the `drone` Kind (session spawn, owner-tagged ECD, follow tick, map marker, console verbs, teardown) but no state machine at all, so the 6-state shortcut would still strand `NoClip`/`Teleport` - the stuck-recovery path this task names. `NetPackageDroneDataSync` / `DroneParticleEffect` also remain unhandled.
+**Status: landed 2026-10-06 (machine + wire); follow steering landed, sentry and shutdown hold their post, and attack stuns the nearest enemy within 22 m (2026-10-12). Heal stays blocked: the ally is a party member, but the heal consumes a stored medical item and zdtd has no drone bag.** The 9-state premise re-verified 2026-10-06. `../../7dtd-engine-research/docs/entities/raycast-pathing.md:471-479` tables all 9 (`Idle`0/`Sentry`1/`Follow`2/`Heal`3/`Attack`4/`Shutdown`5/`NoClip`6/`Teleport`7/`None`8), matching this task. zdtd has the `drone` Kind (session spawn, owner-tagged ECD, follow tick, map marker, console verbs, teardown) and the 9-state machine (`ecs/drone_state.zig`). `NetPackageDroneDataSync` relays from the owner (`c2s/misc_vehicle.zig`, payload opaque). `DroneParticleEffect` stays unhandled: the protocol docs mark it a deferred cosmetic.
 
 **Why:** `../../7dtd-engine-research/docs/entities/raycast-pathing.md` section 6b is the
 authoritative source for the drone state machine (`vehicles-drones-turrets.md`

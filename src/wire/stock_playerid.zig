@@ -194,7 +194,7 @@ pub fn writeEmptyPlayerDataFileNetwork(
 
     // --- PlayerDataFile.Write remainder ---
     // inventory (toolbelt) ItemStack list: pad to stock PUBLIC_SLOTS (10)
-    var tb_pad: [stock_inv.toolbelt_slots]stock_inv.StockSlot = [_]stock_inv.StockSlot{.{}} ** stock_inv.toolbelt_slots;
+    var tb_pad: [stock_inv.toolbelt_slots]stock_inv.StockSlot = @splat(.{});
     {
         const n = @min(toolbelt.len, tb_pad.len);
         @memcpy(tb_pad[0..n], toolbelt[0..n]);
@@ -203,7 +203,7 @@ pub fn writeEmptyPlayerDataFileNetwork(
     try w.writeByte(0); // selectedInventorySlot
     // Bag: pad to stock CarryCapacity base (45). Mismatched counts resize the
     // client bag via Bag.ReadInto and leave every slot occupied (AddItem fails).
-    var bag_pad: [stock_inv.bag_slots]stock_inv.StockSlot = [_]stock_inv.StockSlot{.{}} ** stock_inv.bag_slots;
+    var bag_pad: [stock_inv.bag_slots]stock_inv.StockSlot = @splat(.{});
     {
         const n = @min(bag.len, bag_pad.len);
         @memcpy(bag_pad[0..n], bag[0..n]);

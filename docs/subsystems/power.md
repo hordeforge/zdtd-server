@@ -29,13 +29,13 @@ The grid itself is plain arrays with a monotonic id counter and two totals (`src
 
 ```zig
 pub const PowerGrid = struct {
-    nodes: [max_nodes]PowerNode = [_]PowerNode{.{}} ** max_nodes,
+    nodes: [max_nodes]PowerNode = @splat(.{}),
     node_n: usize = 0,
-    wires: [max_wires]Wire = [_]Wire{.{}} ** max_wires,
+    wires: [max_wires]Wire = @splat(.{}),
     wire_n: usize = 0,
     /// Saved edges waiting for both endpoint nodes to appear (chunks scan
     /// lazily); reconnectPending drains them as the grid rebuilds.
-    pending_wires: [max_wires]WirePos = [_]WirePos{.{}} ** max_wires,
+    pending_wires: [max_wires]WirePos = @splat(.{}),
     pending_wire_n: usize = 0,
 ```
 

@@ -31,7 +31,7 @@ pub fn buildMapChunksBody(buf: []u8, entity_id: i32, pieces: []const MapChunkPie
 
 test "MapChunks body is entityId + count + key + 256 colors per piece" {
     var buf: [4096]u8 = undefined;
-    var colors: [256]u16 = .{0} ** 256;
+    var colors: [256]u16 = @splat(0);
     colors[0] = 434;
     colors[255] = 16816;
     const pieces = [_]MapChunkPiece{.{ .key = 0x00010002, .colors = colors }};
@@ -151,7 +151,7 @@ fn parseChunkPayload(body: []const u8) !ChunkParsed {
 }
 
 test "chunk body layout size and fields" {
-    var heights: [256]u8 = .{64} ** 256;
+    var heights: [256]u8 = @splat(64);
     heights[5 + 5 * 16] = 70;
     var buf: [300]u8 = undefined;
     const body = try buildChunkBody(&buf, 1, -2, &heights);

@@ -55,7 +55,7 @@ const Pool = struct {
     mutex: std.Io.Mutex = .init,
     work_cv: std.Io.Condition = .init,
     done_cv: std.Io.Condition = .init,
-    jobs: [max_workers]Job = [_]Job{.{}} ** max_workers,
+    jobs: [max_workers]Job = @splat(.{}),
     job_n: usize = 0,
     outstanding: usize = 0,
     shutdown: bool = false,
@@ -282,7 +282,7 @@ test "forRanges serial when small" {
 
 test "forRanges parallel covers all" {
     if (builtin.single_threaded) return;
-    var hits: [64]u8 = .{0} ** 64;
+    var hits: [64]u8 = @splat(0);
     const Ctx = struct {
         hits: []u8,
         fn work(ctx: @This(), begin: usize, end: usize) void {
@@ -298,7 +298,7 @@ test "forRanges force serial covers all" {
     defer setForceSerial(false);
     setForceSerial(true);
     try std.testing.expect(isForceSerial());
-    var hits: [64]u8 = .{0} ** 64;
+    var hits: [64]u8 = @splat(0);
     const Ctx = struct {
         hits: []u8,
         fn work(ctx: @This(), begin: usize, end: usize) void {
@@ -314,8 +314,8 @@ test "forRanges nested reentry stays serial and covers all" {
     // Nested forRanges while outer holds in_run must not clobber jobs/outstanding.
     // Separate arrays so outer workers (disjoint ranges) never race nested writes.
     if (builtin.single_threaded) return;
-    var outer_hits: [64]u8 = .{0} ** 64;
-    var nested_hits: [64]u8 = .{0} ** 64;
+    var outer_hits: [64]u8 = @splat(0);
+    var nested_hits: [64]u8 = @splat(0);
     const Outer = struct {
         outer: []u8,
         nested: []u8,

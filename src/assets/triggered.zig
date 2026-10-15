@@ -194,7 +194,7 @@ pub const Triggered = struct {
     /// cumulative `buffWeights`; zombie-fist wound rows). Weights parsed into
     /// buff_weights; the caller picks one deterministically.
     fire_one_buff: bool = false,
-    buff_weights: [16]f32 = .{0} ** 16,
+    buff_weights: [16]f32 = @splat(0),
     buff_weights_n: u8 = 0,
     /// `target="other"` on AddBuff/RemoveBuff rows: stock applies the buff
     /// to the event's other entity (victim-directed perk procs: shotgun
@@ -231,7 +231,7 @@ pub const Triggered = struct {
     /// valueList[CalculatedLevel-1] when the event carries the row's
     /// ProgressionValue (spear-hunter metabolism curves). value_list_n = the
     /// parsed segment count; 0 = plain scalar.
-    value_list: [16]f32 = .{0} ** 16,
+    value_list: [16]f32 = @splat(0),
     value_list_n: u8 = 0,
     /// The row's direct `<requirement>` children, evaluated by the shared
     /// evaluator (empty = ungated).
@@ -307,44 +307,44 @@ pub const max_triggered_mods = 8;
 /// and the wire relay. `truncated` counts requests dropped past a cap so a
 /// caller can surface the bound instead of losing them silently.
 pub const TriggeredResult = struct {
-    mods: [max_triggered_mods]StatMod = [_]StatMod{.{}} ** max_triggered_mods,
+    mods: [max_triggered_mods]StatMod = @splat(.{}),
     mod_n: u8 = 0,
-    add_buffs: [max_triggered_adds][]const u8 = .{""} ** max_triggered_adds,
-    remove_buffs: [max_triggered_removes][]const u8 = .{""} ** max_triggered_removes,
+    add_buffs: [max_triggered_adds][]const u8 = @splat(""),
+    remove_buffs: [max_triggered_removes][]const u8 = @splat(""),
     add_n: u8 = 0,
     remove_n: u8 = 0,
     truncated: u8 = 0,
     /// Victim-directed adds (`target="other"`): parallel to add_buffs, same
     /// order. The caller applies these to the event's other entity.
-    add_other_buffs: [max_triggered_adds][]const u8 = .{""} ** max_triggered_adds,
+    add_other_buffs: [max_triggered_adds][]const u8 = @splat(""),
     add_other_n: u8 = 0,
     /// fireOneBuff flags + weights per other add: the entry's comma list is a
     /// weighted single pick, not all.
-    add_other_fireone: [max_triggered_adds]bool = .{false} ** max_triggered_adds,
-    add_other_weights: [max_triggered_adds][16]f32 = .{.{0} ** 16} ** max_triggered_adds,
-    add_other_weights_n: [max_triggered_adds]u8 = .{0} ** max_triggered_adds,
+    add_other_fireone: [max_triggered_adds]bool = @splat(false),
+    add_other_weights: [max_triggered_adds][16]f32 = @splat(@as([16]f32, @splat(0))),
+    add_other_weights_n: [max_triggered_adds]u8 = @splat(0),
     /// Victim-directed removes, parallel to remove_buffs.
-    remove_other_buffs: [max_triggered_removes][]const u8 = .{""} ** max_triggered_removes,
+    remove_other_buffs: [max_triggered_removes][]const u8 = @splat(""),
     remove_other_n: u8 = 0,
     /// AoE adds (`target="otherAOE"`): buff name + row range/tags per entry.
     /// The caller scans living entities around the event's other entity.
-    add_aoe_buffs: [max_triggered_adds][]const u8 = .{""} ** max_triggered_adds,
-    add_aoe_range: [max_triggered_adds]f32 = .{0} ** max_triggered_adds,
-    add_aoe_tags: [max_triggered_adds][]const u8 = .{""} ** max_triggered_adds,
+    add_aoe_buffs: [max_triggered_adds][]const u8 = @splat(""),
+    add_aoe_range: [max_triggered_adds]f32 = @splat(0),
+    add_aoe_tags: [max_triggered_adds][]const u8 = @splat(""),
     add_aoe_n: u8 = 0,
     /// Party adds (`target="selfOtherPlayers"` AddBuff): buff names fanned out
     /// to party/ally members by the caller.
-    add_party_buffs: [max_triggered_adds][]const u8 = .{""} ** max_triggered_adds,
+    add_party_buffs: [max_triggered_adds][]const u8 = @splat(""),
     add_party_n: u8 = 0,
     /// Party cvar writes (`target="selfOtherPlayers"` ModifyCVar): cvar + op
     /// + resolved value per entry, applied to each member's store.
-    party_cvars: [max_triggered_adds][]const u8 = .{""} ** max_triggered_adds,
-    party_cvar_ops: [max_triggered_adds]cvars.Operation = .{.set} ** max_triggered_adds,
-    party_cvar_vals: [max_triggered_adds]f32 = .{0} ** max_triggered_adds,
+    party_cvars: [max_triggered_adds][]const u8 = @splat(""),
+    party_cvar_ops: [max_triggered_adds]cvars.Operation = @splat(.set),
+    party_cvar_vals: [max_triggered_adds]f32 = @splat(0),
     party_cvar_n: u8 = 0,
     /// Game-event calls (`CallGameEvent`): sequence names the caller runs
     /// through the gameevents runner.
-    game_events: [max_triggered_adds][]const u8 = .{""} ** max_triggered_adds,
+    game_events: [max_triggered_adds][]const u8 = @splat(""),
     game_event_n: u8 = 0,
     /// Cure-all (`RemoveAllNegativeBuffs`): the caller flags every active
     /// buff whose DamageType is set.

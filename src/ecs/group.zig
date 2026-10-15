@@ -34,8 +34,8 @@ fn orderSlot(key: Slot, item: Slot) std.math.Order {
 }
 
 pub const Groups = struct {
-    dense: [n_kinds][max_entities]Slot = .{.{0} ** max_entities} ** n_kinds,
-    len: [n_kinds]u16 = .{0} ** n_kinds,
+    dense: [n_kinds][max_entities]Slot = @splat(@as([max_entities]Slot, @splat(0))),
+    len: [n_kinds]u16 = @splat(0),
 
     /// Sorted insert. No-op when `slot` is already present (so `reviveSlot` and
     /// any double-spawn guard cannot duplicate an entry) or when the list is
@@ -147,7 +147,7 @@ test "fill to capacity then drain" {
 
 test "group order matches an open ascending scan under random churn" {
     var g: Groups = .{};
-    var present: [max_entities]bool = .{false} ** max_entities;
+    var present: [max_entities]bool = @splat(false);
     var prng = std.Random.DefaultPrng.init(0xC0FFEE);
     const rnd = prng.random();
     var op: usize = 0;

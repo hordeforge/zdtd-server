@@ -5,6 +5,20 @@
 //! seeded RNG, optional range-parallel tick work, deterministic sim mode, and
 //! non-blocking TCP listen.
 
+/// Repeat `s` exactly `n` times at comptime. Zig 0.17 removed string-repeat
+/// syntax, and `@splat` only covers arrays.
+/// Repeat `s` exactly `n` times. Zig 0.16 removed string-repeat syntax, and
+/// `@splat` only covers arrays, so this builds a pointer to a caller-sliceable
+/// array; `n` is comptime so the array length is known.
+/// Repeat `s` exactly `n` times. Zig 0.16 removed string-repeat syntax, and
+/// `@splat` only covers arrays, so this returns a value the caller slices or
+/// concatenates. `n` is comptime so the length is known.
+pub fn repeat(comptime s: []const u8, comptime n: usize) [s.len * n]u8 {
+    var out: [s.len * n]u8 = undefined;
+    for (0..n) |i| @memcpy(out[i * s.len ..][0..s.len], s);
+    return out;
+}
+
 pub const arena = @import("arena.zig");
 pub const io_fs = @import("io_fs.zig");
 pub const log = @import("log.zig");

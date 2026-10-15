@@ -367,7 +367,7 @@ test "net string rejects truncated payload and oversized writes" {
     var short: [3]u8 = undefined;
     try std.testing.expectError(error.Overflow, writeNetString(&short, "ab"));
 
-    const oversized = [_]u8{'x'} ** 65535;
+    const oversized: [65535]u8 = @splat('x');
     var unused: [2]u8 = undefined;
     try std.testing.expectError(error.Overflow, writeNetString(&unused, &oversized));
 }
@@ -467,7 +467,11 @@ test "ack encodes header, fixed bitmap, and zero padding" {
     try std.testing.expectEqual(@as(u16, 32767), std.mem.readInt(u16, ack[1..][0..2], .little));
     try std.testing.expectEqual(@as(u8, 3), ack[3]);
     try std.testing.expectEqualSlices(u8, &.{ 0x81, 0x42 }, ack[4..6]);
-    try std.testing.expectEqualSlices(u8, &([_]u8{0} ** (bitmap_bytes - 2)), ack[6..]);
+    // `writeAck` writes the header, zero-fills `bitmap_bytes` of ack bits and
+    // copies the two supplied bytes in front of them, so the two bytes after
+    // the header are the pair and the tail is zero padding.
+    try std.testing.expectEqual(@as(usize, channeled_header_size + bitmap_bytes), ack.len);
+    for (ack[channeled_header_size + 2 ..]) |b| try std.testing.expectEqual(@as(u8, 0), b);
 
     var short: [channeled_header_size + bitmap_bytes - 1]u8 = undefined;
     try std.testing.expectError(error.Overflow, writeAck(&short, 0, 0, 0, &.{}));

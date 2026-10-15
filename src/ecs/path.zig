@@ -43,7 +43,7 @@ pub const Path = struct {
 const NodeMap = struct {
     const cap: usize = 512;
     const empty: u16 = 0xffff;
-    table: [cap]u16 = .{empty} ** cap,
+    table: [cap]u16 = @splat(empty),
 
     fn slot(x: i32, z: i32) usize {
         const ux: u32 = @bitCast(x);
@@ -134,7 +134,7 @@ pub fn bfsToward(
     var qx: [max_nodes]i32 = undefined;
     var qz: [max_nodes]i32 = undefined;
     var qy: [max_nodes]i32 = undefined;
-    var parent: [max_nodes]i32 = .{-1} ** max_nodes;
+    var parent: [max_nodes]i32 = @splat(-1);
     var seen_n: usize = 0;
     var qh: usize = 0;
     var qt: usize = 0;
@@ -251,9 +251,9 @@ pub fn aStarToward(
     var nx_arr: [max_nodes]i32 = undefined;
     var nz_arr: [max_nodes]i32 = undefined;
     var ny_arr: [max_nodes]i32 = undefined;
-    var cost_so_far: [max_nodes]u32 = .{std.math.maxInt(u32)} ** max_nodes;
-    var parent: [max_nodes]i32 = .{-1} ** max_nodes;
-    var closed: [max_nodes]bool = .{false} ** max_nodes;
+    var cost_so_far: [max_nodes]u32 = @splat(std.math.maxInt(u32));
+    var parent: [max_nodes]i32 = @splat(-1);
+    var closed: [max_nodes]bool = @splat(false);
     var n_nodes: usize = 0;
 
     var node_map: NodeMap = .{};

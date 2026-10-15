@@ -228,9 +228,9 @@ test "observerMask matches the scalar reference over random observers" {
 
 test "observerMask edges: empty active, radius zero, cross-origin, last lane" {
     const lanes = 64;
-    var cx: [lanes]i32 = .{7} ** lanes;
-    var cz: [lanes]i32 = .{7} ** lanes;
-    var rad: [lanes]i32 = .{3} ** lanes;
+    var cx: [lanes]i32 = @splat(7);
+    var cz: [lanes]i32 = @splat(7);
+    var rad: [lanes]i32 = @splat(3);
     // No joined peers: no observer regardless of geometry.
     try std.testing.expectEqual(@as(u64, 0), observerMask(lanes, &cx, &cz, &rad, 0, 7, 7));
     // Radius 0 is same-cell only.

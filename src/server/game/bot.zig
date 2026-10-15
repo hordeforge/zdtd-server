@@ -67,7 +67,7 @@ pub const BotWeapon = struct {
     range: f32 = 40,
     pellets: u8 = 1,
     // short gun id tag for logs/list (clanker's GunId, truncated)
-    tag: [12]u8 = .{0} ** 12,
+    tag: [12]u8 = @splat(0),
     tag_len: usize = 0,
 };
 pub const bot_weapon_pistol: BotWeapon = .{ .damage = 16, .range = 40, .pellets = 1, .tag = .{ 'p', 'i', 's', 't', 'o', 'l', 0, 0, 0, 0, 0, 0 }, .tag_len = 6 };
@@ -138,7 +138,7 @@ pub const Bot = struct {
     arrival_dist: f32 = 0.05,
     /// Operator/console display name (bounded, no heap). The stock client needs
     /// an entity_name in the player-mesh spawn body, so bots carry one.
-    name: [24]u8 = .{0} ** 24,
+    name: [24]u8 = @splat(0),
     name_len: usize = 0,
     /// Net id of the last entity that damaged this bot (-1 = none). The guest
     /// reads it indirectly via the damage-event sense trailer (retaliation;
@@ -176,13 +176,13 @@ pub const BotManager = struct {
     /// AI pass joins (tick -> drainWorkerDamage), so no worker ever mutates
     /// hp/events/last_attacker directly. dmg_scale matches systems.zig.
     dmg_scale: u32 = 100,
-    dmg_fp: [max_bots]u32 = .{0} ** max_bots,
-    attacker_fp: [max_bots]std.atomic.Value(i32) = [_]std.atomic.Value(i32){std.atomic.Value(i32).init(-1)} ** max_bots,
+    dmg_fp: [max_bots]u32 = @splat(0),
+    attacker_fp: [max_bots]std.atomic.Value(i32) = @splat(std.atomic.Value(i32).init(-1)),
     /// Fixed slot table; slots are recycled on remove (an !alive slot is free).
     /// MUST be zero-initialized: `spawn` scans `bots[slot].alive` to find a
     /// free slot, and uninitialized memory (Debug allocator 0xAA) reads as
     /// alive=true, making the table look full and `bot count` spawn too few.
-    bots: [max_bots]Bot = [_]Bot{.{}} ** max_bots,
+    bots: [max_bots]Bot = @splat(.{}),
     /// Live bot count (spawn ++, remove / kill --). Indexes known_bots bits.
     n: usize = 0,
     /// Remembered population floor (set by `bot count <n>`); tick tops up when
@@ -194,7 +194,7 @@ pub const BotManager = struct {
     /// Damage events pending in the sense trailer (RFC 0001 §3). Recorded on
     /// attributed damage to a live bot; drained (and cleared) by
     /// `drainSenseEvents` each sense pass, so they are one-tick flavor.
-    events: [max_sense_events]SenseEvent = [_]SenseEvent{.{}} ** max_sense_events,
+    events: [max_sense_events]SenseEvent = @splat(.{}),
     ev_n: usize = 0,
     /// Loadout pool from `[bots] weapon_profiles` (parsed at init; empty =
     /// use the builtin `bot_loadout_pool`).

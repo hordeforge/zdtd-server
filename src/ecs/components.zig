@@ -15,9 +15,10 @@ pub const Kind = enum(u8) {
     /// carries the fallen cells as one EntityFallingBlock, falls under
     /// gravity, dies on landing (no re-placement).
     falling_block,
-    /// Player-owned junk drone (`EntityDrone`). Streamed like any other entity;
-    /// its server state machine (Idle/Sentry/Follow/Heal/Attack/Shutdown) is the
-    /// next slice, so today the kind only carries spawn/stream/despawn.
+    /// Player-owned junk drone (`EntityDrone`). Streamed like any other entity.
+    /// The 9-state machine is `drone_state.zig`; the follow tick drives
+    /// Idle/Follow/Teleport and Sentry/Shutdown hold. Attack and Heal wait on a
+    /// target the server can name.
     drone,
 };
 
@@ -214,6 +215,9 @@ pub const ClassId = struct {
     /// The ammo's Projectile DamageBlock (stock vomit 120). 0 = the shot
     /// damages nothing on a block impact.
     projectile_block_damage: f32 = 0,
+    /// The ammo's ecs item id, so the block hit folds its tagged
+    /// DamageModifier rows. 0 = no ammo known (raw damage lands).
+    projectile_ammo_id: u16 = 0,
     /// Stock `EntityFlying` class (`EntityVulture`): the body holds an altitude
     /// above the terrain instead of falling (see `applyGravity`). Parsed from
     /// the class's `Class`/tags in entityclasses.xml.
@@ -250,10 +254,10 @@ pub const ClassId = struct {
     /// `SetNearestEntityAsTarget class=` list (Unity name hashes, see
     /// EntityDef.target_class_hashes) and its length. 0 = no list parsed, so
     /// acquisition stays player-only (fail closed without stock data).
-    target_class_hashes: [max_target_classes]i32 = .{0} ** max_target_classes,
+    target_class_hashes: [max_target_classes]i32 = @splat(0),
     /// Per-entry `chaseTimeMax` from the same `Type,chaseTime` pairs (see
     /// EntityDef.target_chase_max).
-    target_chase_max: [max_target_classes]f32 = .{0} ** max_target_classes,
+    target_chase_max: [max_target_classes]f32 = @splat(0),
     /// `chaseTimeMax` of the `EntityPlayer` entry specifically: a player target
     /// carries the client class hash, not the `EntityPlayer` type name, so the
     /// list lookup cannot find it by hash (`EAIApproachAndAttackTarget` matches
@@ -439,6 +443,15 @@ pub const ZombieAi = struct {
     /// spawning.xml rule index that spawned this zombie (0xffff = none), for
     /// the ambient per-rule budget release on destroy (aidirector.releaseRule).
     spawn_rule: u16 = 0xffff,
+    /// Set by markCorpse: the destroy that follows is a kill, which thins the
+    /// district's spawn cap (DecCount killed=true, spawning.md §3). A despawn
+    /// leaves it clear and only frees the slot.
+    killed: bool = false,
+    /// District the spawn was charged against (`districtKey` at spawn). Stock
+    /// releases against the spawner's chunk, not where the body dies, so a
+    /// zombie that walks into the next district still frees its own slot.
+    /// 0 = no district charged.
+    spawn_district: u32 = 0,
     /// Stock EAITaskEntry.executeTime: per-task re-evaluation timer.
     decision_cd: f32 = 0,
     /// Winning task from the last selection pass (EAITaskList executing set).
@@ -556,7 +569,7 @@ pub const ZombieAi = struct {
     /// path_wp_max steps, so a chase pays one A* per ~8 m of travel instead of
     /// per metre, and a tick refused by the node budget still has somewhere to
     /// walk.
-    path_wp: [path_wp_max]PathWp = [_]PathWp{.{}} ** path_wp_max,
+    path_wp: [path_wp_max]PathWp = @splat(.{}),
     path_wp_n: u8 = 0,
     path_wp_i: u8 = 0,
     /// Goal cell the buffer was planned for; a goal that moves off it forces a
@@ -766,7 +779,7 @@ pub const Vehicle = struct {
     fuel: f32 = 100,
     /// Rider net id per seat, -1 when free. Index is the wire slot carried by
     /// NetPackageEntityAttach (asm.il:844620).
-    seats: [max_seats]i32 = [_]i32{-1} ** max_seats,
+    seats: [max_seats]i32 = @splat(-1),
     /// Usable seats, always clamped to 1..max_seats on spawn.
     seat_count: u8 = 1,
     /// Vertical velocity accumulator for gravity integration (systemVehicles).
@@ -779,7 +792,7 @@ pub const Vehicle = struct {
     /// Basket contents (RE NetPackageBag, research dedicated-misc-systems.md
     /// vehicle storage pin v2): the basket is Entity.bag, synced as a Bag blob.
     /// A packed fixed array, like the player inventory; empty slots hold id 0.
-    basket: [max_basket_slots]InvSlot = [_]InvSlot{.{}} ** max_basket_slots,
+    basket: [max_basket_slots]InvSlot = @splat(.{}),
     basket_n: u8 = 0,
     /// Owning client slot (stock Entity.belongsPlayerId, resolved from the
     /// placing player's platform id via Vehicle.OwnerId); -1 = unowned
@@ -874,7 +887,7 @@ pub const Turret = struct {
     /// slot is per-session; `owner_name` is what survives a restart and the
     /// login path re-maps the slot from it.
     owner_slot: i16 = -1,
-    owner_name: [max_owner_name]u8 = .{0} ** max_owner_name,
+    owner_name: [max_owner_name]u8 = @splat(0),
     owner_name_len: u8 = 0,
 
     /// Record the placing player's name alongside the slot. A name longer
@@ -965,7 +978,7 @@ pub const QuestProgress = struct {
     /// XML-parsed quests with `def.objectives` use it - legacy defs use
     /// `progress`). Stock refreshQuestCompletion reads each objective's
     /// CurrentValue.
-    obj_progress: [max_quest_objectives]u16 = [_]u16{0} ** max_quest_objectives,
+    obj_progress: [max_quest_objectives]u16 = @splat(0),
     /// Stock Quest.RallyMarkerActivated (asm.il 989046): the marker block is
     /// spent for this quest and BlockRallyMarker stops offering activation.
     rally_activated: bool = false,
@@ -1000,7 +1013,7 @@ pub const QuestProgress = struct {
 };
 
 pub const Journal = struct {
-    slots: [max_journal]QuestProgress = [_]QuestProgress{.{}} ** max_journal,
+    slots: [max_journal]QuestProgress = @splat(.{}),
 
     pub fn findActive(self: *Journal, def_id: u16) ?*QuestProgress {
         for (&self.slots) |*s| {
@@ -1079,7 +1092,7 @@ pub const InvSlot = struct {
     /// Attached mod item ids (stock ItemValue.Modifications; 4 covers the
     /// stock slot counts). The mods' stat effects are client-side; the ids
     /// persist so a modded weapon survives a relog. 0 = empty slot.
-    mods: [4]u16 = .{0} ** 4,
+    mods: [4]u16 = @splat(0),
     /// Active mod count (<= mods.len). Persisted since ZPV17 (older loads
     /// derive it from the first contiguous non-zero mod ids).
     mod_n: u8 = 0,
@@ -1087,11 +1100,11 @@ pub const InvSlot = struct {
     /// carries it; RequirementItemModTier compares it. 0 with a non-zero mod
     /// id means "unset" and folds as stock's nested default of 1.
     /// Persisted since ZPV17.
-    mod_qualities: [4]u8 = .{0} ** 4,
+    mod_qualities: [4]u8 = @splat(0),
     /// ItemValue stats (stock `ItemValue/Stat`): the per-item passive-effect
     /// deltas a client-created item carries. Kept as the wire pair so an echo
     /// round-trips exactly (stock's `Stat` ctor sets `isBoosted = slot_b > 0`).
-    stats: [max_item_stats]ItemStat = .{ItemStat{}} ** max_item_stats,
+    stats: [max_item_stats]ItemStat = @splat(ItemStat{}),
     stats_n: u8 = 0,
 
     /// Encode this slot into `out` at `inv_slot_persist_stride` bytes so every
@@ -1199,7 +1212,7 @@ pub fn maxStackOffline(item_id: u16) u16 {
 }
 
 pub const Inventory = struct {
-    slots: [max_inv_slots]InvSlot = [_]InvSlot{.{}} ** max_inv_slots,
+    slots: [max_inv_slots]InvSlot = @splat(.{}),
     /// Held toolbelt index 0..inv_toolbelt-1, or inv_no_holding.
     holding: u16 = 0,
     /// Open container entity net id (-1 = none).
@@ -1377,12 +1390,12 @@ pub const StockEntry = struct {
     /// IL_022F calls `AddGSStats` with stage -1, i.e. derived from the first
     /// row of the entry's quality). Same wire shape as the inventory slot so
     /// the buy path deposits the whole value.
-    stats: [max_item_stats]ItemStat = .{ItemStat{}} ** max_item_stats,
+    stats: [max_item_stats]ItemStat = @splat(ItemStat{}),
     stats_n: u8 = 0,
     /// Pre-installed mod item ids (stock ItemValue.Modifications from
     /// `createDefaultModItems`, items.md 324). Same shape as `InvSlot.mods`
     /// so the buy path deposits the whole value. 0 = empty slot.
-    mods: [4]u16 = .{0} ** 4,
+    mods: [4]u16 = @splat(0),
     /// Active mod count (<= mods.len). See `InvSlot.mod_n`.
     mod_n: u8 = 0,
 };
@@ -1394,7 +1407,7 @@ fn defaultStock() [max_stock]StockEntry {
         .{ .item = 4, .count = 10, .price = 12, .sell = 4 },
         .{ .item = 5, .count = 3, .price = 40, .sell = 15 },
         .{ .item = 1, .count = 100, .price = 1, .sell = 1 },
-    } ++ [_]StockEntry{.{}} ** (max_stock - 5);
+    } ++ @as([max_stock - 5]StockEntry, @splat(.{}));
 }
 
 pub const TraderStock = struct {
@@ -1752,7 +1765,7 @@ pub const BuffInstance = struct {
 };
 
 pub const BuffSet = struct {
-    slots: [max_buffs_per_entity]BuffInstance = [_]BuffInstance{.{}} ** max_buffs_per_entity,
+    slots: [max_buffs_per_entity]BuffInstance = @splat(.{}),
 
     pub fn find(self: *BuffSet, def_id: u16) ?*BuffInstance {
         for (&self.slots) |*s| {
@@ -1880,10 +1893,10 @@ test "Turret.setOwnerName truncates on a UTF-8 codepoint boundary" {
     // max_owner_name is 32; eleven CJK codepoints are 33 bytes. A byte cut
     // would leave a dangling lead in the persisted reclaim key.
     var t: Turret = .{};
-    t.setOwnerName("名" ** 11);
+    t.setOwnerName(&@import("../util/root.zig").repeat("名", 11));
     try std.testing.expectEqual(@as(u8, 30), t.owner_name_len);
     try std.testing.expect(std.unicode.utf8ValidateSlice(t.owner_name[0..t.owner_name_len]));
-    try std.testing.expectEqualStrings("名" ** 10, t.owner_name[0..t.owner_name_len]);
+    try std.testing.expectEqualStrings(&@import("../util/root.zig").repeat("名", 10), t.owner_name[0..t.owner_name_len]);
 }
 
 test "InvSlot persist round-trips flags mod_n qualities and stats" {
@@ -1930,7 +1943,7 @@ test "InvSlot persist round-trips flags mod_n qualities and stats" {
 test "InvSlot readPersist derives mod_n from a widened ZPV16 stride" {
     // 52-byte ZPV16 shape: mods present, trailing flags/mod_n zero-filled on
     // upgrade so the reader must recover mod_n from the ids.
-    var buf: [52]u8 = .{0} ** 52;
+    var buf: [52]u8 = @splat(0);
     std.mem.writeInt(u16, buf[0..2], 8, .little);
     std.mem.writeInt(u16, buf[2..4], 1, .little);
     std.mem.writeInt(u16, buf[13..15], 20, .little);

@@ -161,6 +161,7 @@ fn applyEntityClassStats(cid: *c.ClassId, def: EntityClass, x: f32, z: f32) void
     cid.projectile_radius = def.projectile_radius;
     cid.projectile_damage = def.projectile_damage;
     cid.projectile_block_damage = def.projectile_block_damage;
+    cid.projectile_ammo_id = def.projectile_ammo_id;
     cid.flying = def.flying;
     cid.attack_damage = def.attack_damage;
     cid.phys_resist = def.phys_resist;
@@ -293,6 +294,9 @@ pub const EntityClass = struct {
     /// The ammo's Projectile DamageBlock (stock vomit 120). 0 = a block
     /// impact damages nothing.
     projectile_block_damage: f32 = 0,
+    /// The ammo's ecs item id, so the block hit folds its tagged
+    /// DamageModifier rows. 0 = no ammo known (raw damage lands).
+    projectile_ammo_id: u16 = 0,
     /// Stock `EntityFlying` class (the vulture): `applyGravity` holds an
     /// altitude above the terrain for these bodies instead of falling.
     flying: bool = false,
@@ -324,8 +328,8 @@ pub const EntityClass = struct {
     previous_tier: []const u8 = "",
     /// `SetNearestEntityAsTarget class=` victim list (Unity name hashes) and
     /// its length; 0 = no list, keep the legacy player-only acquisition.
-    target_class_hashes: [c.max_target_classes]i32 = .{0} ** c.max_target_classes,
-    target_chase_max: [c.max_target_classes]f32 = .{0} ** c.max_target_classes,
+    target_class_hashes: [c.max_target_classes]i32 = @splat(0),
+    target_chase_max: [c.max_target_classes]f32 = @splat(0),
     target_chase_max_players: f32 = 0,
     target_class_n: u8 = 0,
     entity_flags: u32 = 0,
@@ -405,19 +409,19 @@ pub const World = struct {
     /// read it for windowed flags like the ADR 0037 glide exemption).
     sim_tick: u64 = 0,
 
-    alive: [max_entities]bool = .{false} ** max_entities,
-    mask: [max_entities]Mask = [_]Mask{.{}} ** max_entities,
+    alive: [max_entities]bool = @splat(false),
+    mask: [max_entities]Mask = @splat(.{}),
 
-    transform: [max_entities]c.Transform = [_]c.Transform{.{}} ** max_entities,
-    health: [max_entities]c.Health = [_]c.Health{.{}} ** max_entities,
-    network_id: [max_entities]c.NetworkId = [_]c.NetworkId{.{}} ** max_entities,
-    kind: [max_entities]c.Kind = [_]c.Kind{.zombie} ** max_entities,
-    player: [max_entities]c.Player = [_]c.Player{.{}} ** max_entities,
+    transform: [max_entities]c.Transform = @splat(.{}),
+    health: [max_entities]c.Health = @splat(.{}),
+    network_id: [max_entities]c.NetworkId = @splat(.{}),
+    kind: [max_entities]c.Kind = @splat(.zombie),
+    player: [max_entities]c.Player = @splat(.{}),
     /// Per-player stealth-noise state (RE entity-ai.md PlayerStealth): the
     /// movement-noise volume model (sounds.xml noise table → NotifyNoise →
     /// CalcVolume → attraction/hearing). Only meaningful for .player slots.
-    stealth: [max_entities]c.Stealth = [_]c.Stealth{.{}} ** max_entities,
-    zombie_ai: [max_entities]c.ZombieAi = [_]c.ZombieAi{.{}} ** max_entities,
+    stealth: [max_entities]c.Stealth = @splat(.{}),
+    zombie_ai: [max_entities]c.ZombieAi = @splat(.{}),
     /// Combat-noise ring (group AI): melee/ranged hits push events (atomic
     /// counter; parallel AI workers + the net thread), the AI consume pass
     /// alerts zombies and wakes sleepers and drains the ring. Cap + per-tick
@@ -460,10 +464,10 @@ pub const World = struct {
     /// Consume-owns-drain like noise; parallel AI workers push atomically.
     sleeper_wake_reqs: [c.sleeper_wake_cap]c.SleeperWakeRequest = undefined,
     sleeper_wake_n: usize = 0,
-    falling: [max_entities]c.FallingBlocks = [_]c.FallingBlocks{.{}} ** max_entities,
-    vehicle: [max_entities]c.Vehicle = [_]c.Vehicle{.{}} ** max_entities,
-    turret: [max_entities]c.Turret = [_]c.Turret{.{}} ** max_entities,
-    trader_stock: [max_entities]c.TraderStock = [_]c.TraderStock{.{}} ** max_entities,
+    falling: [max_entities]c.FallingBlocks = @splat(.{}),
+    vehicle: [max_entities]c.Vehicle = @splat(.{}),
+    turret: [max_entities]c.Turret = @splat(.{}),
+    trader_stock: [max_entities]c.TraderStock = @splat(.{}),
     /// Trader restock refill policy (zdtd.toml [sim] trader_restock_*): each
     /// restock grows stackable entries toward `trader_restock_cap` by at most
     /// `trader_restock_refill`. Bucket B (zdtd sim strategy, not stock data).
@@ -472,31 +476,31 @@ pub const World = struct {
     /// Sim rule parameters (ADR 0021): combat/ai/bloodmoon tuning, overlaid
     /// from the mode pack and zdtd.toml by main.zig (Game sets this at init).
     rules: rules_mod.Rules = .{},
-    journal: [max_entities]c.Journal = [_]c.Journal{.{}} ** max_entities,
-    wallet: [max_entities]c.Wallet = [_]c.Wallet{.{}} ** max_entities,
-    inventory: [max_entities]c.Inventory = [_]c.Inventory{.{}} ** max_entities,
-    class_id: [max_entities]c.ClassId = [_]c.ClassId{.{}} ** max_entities,
-    loot_bag: [max_entities]c.LootBag = [_]c.LootBag{.{}} ** max_entities,
-    sleeper: [max_entities]c.Sleeper = [_]c.Sleeper{.{}} ** max_entities,
+    journal: [max_entities]c.Journal = @splat(.{}),
+    wallet: [max_entities]c.Wallet = @splat(.{}),
+    inventory: [max_entities]c.Inventory = @splat(.{}),
+    class_id: [max_entities]c.ClassId = @splat(.{}),
+    loot_bag: [max_entities]c.LootBag = @splat(.{}),
+    sleeper: [max_entities]c.Sleeper = @splat(.{}),
     /// Owning SleeperVolume index per entity (0 = not sleeper-spawned): the
     /// volume re-arm alive-count recount (stock SleeperVolume.ClearedUpdate).
-    sleeper_vol: [max_entities]u16 = [_]u16{0} ** max_entities,
-    flags: [max_entities]c.Flags = [_]c.Flags{.{}} ** max_entities,
-    dirty: [max_entities]c.Dirty = [_]c.Dirty{.{}} ** max_entities,
+    sleeper_vol: [max_entities]u16 = @splat(0),
+    flags: [max_entities]c.Flags = @splat(.{}),
+    dirty: [max_entities]c.Dirty = @splat(.{}),
     /// Lazily attached (see buffsMut): most entities never carry a buff, and
     /// spawnBase resets mask[s] wholesale, so a stale set can never be read.
-    buffs: [max_entities]c.BuffSet = [_]c.BuffSet{.{}} ** max_entities,
+    buffs: [max_entities]c.BuffSet = @splat(.{}),
     /// Lazily attached per-entity custom variables (cvarsMut): zombies carry
     /// bleed/sprain counters written by victim-directed ModifyCVar rows and
     /// read back by CVarCompare target=other escalation gates (DeepCuts,
     /// PummelPete), exactly like stock EntityBuffs cvars. Players use the
     /// client store; this column serves non-client entities.
-    entity_cvars: [max_entities]cvars.Set = [_]cvars.Set{.{}} ** max_entities,
+    entity_cvars: [max_entities]cvars.Set = @splat(.{}),
     /// Buff-side PhysicalDamageResist percent summed over the entity's active
     /// buffs (the passive-effects VM, assets/buffs.zig effectTotals), refreshed
     /// by the survival tick. Feeds armorMitigation like stock
     /// GetTotalPhysicalArmorRating sums the wearer's passive 41.
-    buff_phys_resist: [max_entities]f32 = [_]f32{0} ** max_entities,
+    buff_phys_resist: [max_entities]f32 = @splat(0),
     /// `EAIManager.CalcSenseScale` result for this tick: the sandbox
     /// `ZombieFeralSense` option (0..3) resolved against the world clock.
     /// Refreshed by the Game each tick; 0 = off.
@@ -526,40 +530,40 @@ pub const World = struct {
     /// refreshed by the survival tick. Stock `GetTotalPhysicalArmorRating`
     /// sums passive 41 over the worn items' effect layers, so a plating mod
     /// (+1/+2) joins the same mitigation as the item's own row.
-    item_mod_phys_resist: [max_entities]f32 = [_]f32{0} ** max_entities,
+    item_mod_phys_resist: [max_entities]f32 = @splat(0),
     /// Buff/perk-side GeneralDamageResist (passive 40) summed by the same
     /// untagged VM fold and refreshed by the survival tick. Stock
     /// `EntityAlive::DamageEntity` (IL=236) reads it with an empty tag set and
     /// applies `min(1, value)` to EVERY incoming damage type, so it joins every
     /// player-damage choke (AI melee, C2S claims, explosions, environmental DoT).
-    buff_general_resist: [max_entities]f32 = [_]f32{0} ** max_entities,
+    buff_general_resist: [max_entities]f32 = @splat(0),
     /// NoiseMultiplier product (passive 88, base 1.0) over the entity's buffs,
     /// perks and worn/held items, refreshed by the survival tick. Stock
     /// `PlayerStealth.CalcVolume`/`NotifyNoise` multiply the volume by
     /// `GetValue(88)`. 1.0 = stock base (no rows), so the offline path that
     /// never writes this column reads neutral.
-    stealth_noise_mult: [max_entities]f32 = [_]f32{1} ** max_entities,
+    stealth_noise_mult: [max_entities]f32 = @splat(1),
     /// LightMultiplier product (passive 89, base 1.0) over the entity's buffs,
     /// perks and worn/held items, refreshed by the survival tick. Stock
     /// `PlayerStealth.TickServer` blends it into lightLevel as
     /// `(0.32 + 0.68 x passive89)`. 1.0 = stock base, neutral offline.
-    stealth_light_mult: [max_entities]f32 = [_]f32{1} ** max_entities,
+    stealth_light_mult: [max_entities]f32 = @splat(1),
     /// LootStage product (passive 159, base 1.0) over the entity's buffs,
     /// perks and worn/held items, refreshed by the survival tick. Stock
     /// `EntityPlayer.GetLootStage` multiplies the floored total by
     /// `GetValue(159)`. 1.0 = stock base, neutral offline.
-    loot_stage_mult: [max_entities]f32 = [_]f32{1} ** max_entities,
+    loot_stage_mult: [max_entities]f32 = @splat(1),
 
     /// Peer slots are bounded by the server's fixed client table. Keeping the
     /// reverse index here avoids a full entity scan in every C2S inventory,
     /// quest, movement, and replication lookup.
-    peer_to_player: [max_entities]Slot = .{no_player_slot} ** max_entities,
+    peer_to_player: [max_entities]Slot = @splat(no_player_slot),
 
     next_net_id: i32 = 100,
     /// Live entity slots (spawnBase ++, destroy --). Soft-warn path only.
     entity_count: u16 = 0,
     /// Per-slot reincarnation counter (generation-counted handles).
-    slot_gen: [max_entities]u32 = .{0} ** max_entities,
+    slot_gen: [max_entities]u32 = @splat(0),
     /// Cached per-kind dense slot lists (spawnBase inserts, destroy removes),
     /// kept slot-ascending so group iteration equals the open View scan. Owns
     /// the per-kind live count too, so countKind is O(1) off the same fact.
@@ -584,18 +588,18 @@ pub const World = struct {
     /// Collision-hazard contact latch, one packed cell key per slot (-1 =
     /// none): a `BlockDamage` subclass hurts an entity once per contact, since
     /// stock's collision callback fires on the colliding pair, not every tick.
-    hazard_cell: [max_entities]i64 = [_]i64{-1} ** max_entities,
+    hazard_cell: [max_entities]i64 = @splat(-1),
     /// `Entity.motionMultiplier`: stock sets it from the MovementFactor of the
     /// block the entity stands on (BlockDamage.OnEntityCollidedWithBlock
     /// IL_00AA-00DD, recomputed on a standing-block change in EntityAlive.Update
     /// IL_0243). 1 = normal. The factor itself is the block's material
     /// MovementFactor (MaterialBlock.MovementFactor; Block.MovementFactor has no
     /// XML property string, so it comes from the material).
-    move_scale: [max_entities]f32 = [_]f32{1.0} ** max_entities,
+    move_scale: [max_entities]f32 = @splat(1.0),
     /// Cell whose `BuffsWhenWalkedOn` list was last applied to this entity
     /// (`EntityAlive.updateCurrentBlockPosAndValue` applies them when the
     /// standing block changes, not every tick). -1 = none.
-    walk_buff_cell: [max_entities]i64 = [_]i64{-1} ** max_entities,
+    walk_buff_cell: [max_entities]i64 = @splat(-1),
     /// Slots with at least one dirty bit set, derived from `dirty[]`. Lets the
     /// per-tick replicate pass build its candidate set and clear the motion
     /// bits in O(changed) rather than O(max_entities).
@@ -716,7 +720,7 @@ pub const World = struct {
     /// Operator starter kit (zdtd.toml `[sim] spawn_starter_kit`), resolved by
     /// Game after the item catalog loads. `starter_kit_n == 0` means "not
     /// configured": spawnPlayer then grants the built-in default kit below.
-    starter_kit: [max_starter_kit]StarterKitEntry = [_]StarterKitEntry{.{}} ** max_starter_kit,
+    starter_kit: [max_starter_kit]StarterKitEntry = @splat(.{}),
     starter_kit_n: u8 = 0,
     /// traders.xml root `currency_item` (stock "casinoCoin"); default starter
     /// kit coin row resolves this name. Empty → stock name.
@@ -931,11 +935,11 @@ pub const World = struct {
     /// drones). -1 = unowned. Replication reads it to fill the ECD's
     /// `belongsPlayerId`, which is how the stock client attributes a drone to
     /// its owner (`DroneManager` only shows a player the drones they own).
-    entity_owner_slot: [max_entities]i16 = [_]i16{-1} ** max_entities,
+    entity_owner_slot: [max_entities]i16 = @splat(-1),
     /// Drone companion state machine (stock `EntityDrone.State`,
     /// raycast-pathing.md 6b). `none` is the unset sentinel; a spawned drone
     /// starts at `idle`. `DroneState.setState` is the single mutator.
-    drone_state: [max_entities]drone_state_mod.DroneState = [_]drone_state_mod.DroneState{.{}} ** max_entities,
+    drone_state: [max_entities]drone_state_mod.DroneState = @splat(.{}),
 
     class_table: [17]EntityClass = [_]EntityClass{
         .{ .name = "player", .max_hp = 100, .kind = .player, .hash = 2001454542 },
@@ -963,7 +967,7 @@ pub const World = struct {
         // spawns resolve per-class via the director class_resolve_fn hook (A35).
         // Past the mapped rows: nothing indexes a feral row by position.
         .{ .name = "zombieBoeFeral", .max_hp = 550, .kind = .zombie, .hash = -272178566, .loot_list = "EntityLootContainerRegular" },
-    } ++ [_]EntityClass{.{}} ** 7,
+    } ++ @as([7]EntityClass, @splat(.{})),
 
     /// Catalog stack cap: `stack_fn` (items.xml Stacknumber) or offline builtins.
     /// Single source for deposit paths; do not hardcode 60000 at call sites.
@@ -1087,7 +1091,9 @@ pub const World = struct {
         // Release the ambient spawn-rule budget (kill attrition, spawning.md
         // §3): a zombie spawned by the biome drip decrements its rule's count.
         if (self.mask[slot].zombie_ai and self.zombie_ai[slot].spawn_rule != 0xffff) {
-            self.director.releaseRule(self.zombie_ai[slot].spawn_rule);
+            const t = self.transform[slot];
+            const ai = self.zombie_ai[slot];
+            self.director.releaseRule(ai.spawn_rule, ai.spawn_district, t.x, t.z, ai.killed);
         }
         if (had_kind) self.kind_groups.remove(kind_val, slot);
         if (self.mask[slot].player) {
@@ -1545,6 +1551,7 @@ pub const World = struct {
                 .projectile_radius = ct.projectile_radius,
                 .projectile_damage = ct.projectile_damage,
                 .projectile_block_damage = ct.projectile_block_damage,
+                .projectile_ammo_id = ct.projectile_ammo_id,
             };
         }
         return id;
@@ -1696,9 +1703,10 @@ pub const World = struct {
         return self.network_id[s].id;
     }
 
-    /// Player-owned junk drone (`EntityDrone`). No AI tasks yet: the kind exists
-    /// so the entity spawns, streams to observers and can be despawned; the stock
-    /// Idle/Sentry/Follow/Heal/Attack/Shutdown machine is the next slice.
+    /// Player-owned junk drone (`EntityDrone`). The kind spawns, streams and
+    /// despawns; the 9-state machine lives in `drone_state.zig` and the follow
+    /// tick drives Idle/Follow/Teleport while Sentry and Shutdown hold. Attack
+    /// and Heal wait on a target the server can name.
     /// Builtin class-table HP for a kind, through the same positional mapping
     /// `spawnBase` uses, so callers never hardcode a table index.
     pub fn classTableHp(self: *const World, kind: Kind) f32 {
@@ -2359,6 +2367,7 @@ pub const World = struct {
             self.zombie_ai[s].state = .idle;
             self.zombie_ai[s].target_id = -1;
             self.zombie_ai[s].alert = false;
+            self.zombie_ai[s].killed = true;
         }
     }
 

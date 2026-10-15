@@ -13,17 +13,17 @@ The server is a single struct holding the socket plus a fixed array of peer slot
 ```zig
 pub const max_peers = 64;
 
+/// Print window for repeated drain faults (first, then every Nth).
+const drain_error_every: u32 = 64;
+
 pub const Server = struct {
     sock: udp.Socket = .{},
     port: u16 = 0,
-    peers: [max_peers]peer_mod.Peer = [_]peer_mod.Peer{.{}} ** max_peers,
+    peers: [max_peers]peer_mod.Peer = @splat(.{}),
     next_local_id: i32 = 1,
-    server_password: []const u8 = "",
-    join_rate_limit_ms: u64 = 0,
-    join_ip: [64]u32 = .{0} ** 64,
-    join_ip_ms: [64]u64 = .{0} ** 64,
-    join_ip_n: usize = 0,
-    connect_rejects: u64 = 0,
+    /// Socket faults seen by `drainControl` (the mid-send ack drain). It
+    /// returns void, so this is the only place the fault is recorded.
+    drain_errors: u32 = 0,
 ```
 
 `Game` embeds one by value (`net: ln_server.Server = .{}`, src/server/game.zig:404) and holds the receive buffer it passes to poll (`recv_buf: [65536]u8`, src/server/game.zig:454). The port is not the operator's `--port`: stock binds the LiteNet UDP socket at `ServerPort + 2`, so init computes `port +% 2` and calls `net.listen` there, then copies the ServerPassword into the transport (src/server/game/init_world.zig:93). A `port == 0` harness run never binds, and the unbound socket then reports `WouldBlock` on receive and silently drops on send so the seeded sim stays sealed (src/litenet/udp_socket.zig:87, src/litenet/udp_socket.zig:102).
@@ -105,9 +105,9 @@ The window state on the peer is sequences plus a bitmap, not a ring of payloads 
     remote_window_start: u16 = 0,
     remote_seq_next: u16 = 0,
     /// Bits for remote sequences currently in window (for duplicate detect + acks).
-    ack_bits: [ack_bitmap_bytes]u8 = .{0} ** ack_bitmap_bytes,
+    ack_bits: [ack_bitmap_bytes]u8 = @splat(0),
     must_ack: bool = false,
-    pending: [pending_cap]Pending = [_]Pending{.{}} ** pending_cap,
+    pending: [pending_cap]Pending = @splat(.{}),
 ```
 
 `pending_cap` equals the window size and `max_sequence` is 32768, asserted divisible so consecutive in-window sequence numbers never collide on a slot across wrap (src/litenet/peer.zig:15, src/litenet/packet.zig:44). `relSeq` maps a difference into `[-half, half)` with modular wrap, and every window comparison in the file is built on it (src/litenet/peer.zig:720).
@@ -126,8 +126,8 @@ const Assembly = struct {
     frag_id: u16 = 0,
     total: u16 = 0,
     got: u16 = 0,
-    have: [max_frag_parts]bool = .{false} ** max_frag_parts,
-    part_len: [max_frag_parts]u16 = .{0} ** max_frag_parts,
+    have: [max_frag_parts]bool = @splat(false),
+    part_len: [max_frag_parts]u16 = @splat(0),
     /// Part payload storage (part i starts at i * max_fragment_user).
     parts: [max_frag_parts][packet.max_fragment_user]u8 = undefined,
 };

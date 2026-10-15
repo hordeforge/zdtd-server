@@ -36,8 +36,8 @@ pub const Container = struct {
     /// Stock block id for composite TE (0 = generic).
     block_id: i32 = 0,
     /// Stable TransactionalInventory key (Guid bytes). Deterministic from pos.
-    inv_guid: [16]u8 = .{0} ** 16,
-    slots: [max_container_slots]components.InvSlot = [_]components.InvSlot{.{}} ** max_container_slots,
+    inv_guid: [16]u8 = @splat(0),
+    slots: [max_container_slots]components.InvSlot = @splat(.{}),
     slot_count: u16 = 8, // default 2x4
     /// Grid size the client observed for this container (loot.xml
     /// LootContainer size_x/size_y on the stock client's TE write). 0/0 =
@@ -65,7 +65,7 @@ pub const Container = struct {
     lock_len: u16 = 0,
 
     pub fn clear(self: *Container) void {
-        self.slots = [_]components.InvSlot{.{}} ** max_container_slots;
+        self.slots = @as([max_container_slots]components.InvSlot, @splat(.{}));
         self.touched = false;
     }
 
@@ -79,7 +79,7 @@ pub const Container = struct {
 /// Deterministic Guid from world pos (not random NewGuid; stable across restarts).
 /// Bytes: x:i32 | y:i32 | z:i32 | tag "ZTE\x01".
 pub fn guidFromPos(pos: PosKey) [16]u8 {
-    var g: [16]u8 = .{0} ** 16;
+    var g: [16]u8 = @splat(0);
     std.mem.writeInt(i32, g[0..4], pos.x, .little);
     std.mem.writeInt(i32, g[4..8], pos.y, .little);
     std.mem.writeInt(i32, g[8..12], pos.z, .little);
@@ -106,8 +106,8 @@ pub const ContainerStore = struct {
     items: [max_containers]Container = undefined,
     /// Lookup key mirror of `items[i].pos`, written by getOrCreate. Only valid
     /// where `used[i]`; the AoS `pos` stays authoritative for save/encode.
-    keys: [max_containers]PosKey = .{PosKey{ .x = 0, .y = 0, .z = 0 }} ** max_containers,
-    used: [max_containers]bool = .{false} ** max_containers,
+    keys: [max_containers]PosKey = @splat(PosKey{ .x = 0, .y = 0, .z = 0 }),
+    used: [max_containers]bool = @splat(false),
     n: usize = 0,
     /// Once: warn when getOrCreate drops a container because the table is full.
     cap_warned: bool = false,

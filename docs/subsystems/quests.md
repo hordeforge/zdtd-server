@@ -39,11 +39,11 @@ pub const QuestProgress = struct {
 
 The tail fields are `obj_progress: [max_quest_objectives]u16`, per flat-objective progress indexed by declaration order and used only by XML-parsed defs (`src/ecs/components.zig:648`); `rally_activated: bool` (`:662`); `poi: PoiRect`, the footprint the quest runs in (`:665`); `is_shared: bool`, latched when the owner's party is handed the quest (`:669`); and `giver_x` / `giver_y` / `giver_z`, the trader that offered it (`:673`). The record stores progress counts only: the required count and the phase list come from the catalog at read time, so an XML edit re-reads against existing slots.
 
-Eight slots per player, never a heap allocation (`src/ecs/components.zig:577`). The journal itself is a flat array with two lookups (src/ecs/components.zig:667):
+Eight slots per player, never a heap allocation (`src/ecs/components.zig:1015`). The journal itself is a flat array with two lookups (src/ecs/components.zig:667):
 
 ```zig
 pub const Journal = struct {
-    slots: [max_journal]QuestProgress = [_]QuestProgress{.{}} ** max_journal,
+    slots: [max_journal]QuestProgress = @splat(.{}),
 
     pub fn findActive(self: *Journal, def_id: u16) ?*QuestProgress {
         for (&self.slots) |*s| {

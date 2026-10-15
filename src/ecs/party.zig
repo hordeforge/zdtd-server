@@ -23,7 +23,7 @@ pub const max_parties: usize = 8;
 /// Stock Party: PartyID, MemberList (entity ids), LeaderIndex, VoiceLobbyId.
 pub const Party = struct {
     id: i32 = -1,
-    members: [max_party_members]i32 = .{-1} ** max_party_members,
+    members: [max_party_members]i32 = @splat(-1),
     n: u8 = 0,
     leader_index: u8 = 0,
     /// VoiceLobbyId (SetVoiceLobby). zdtd owns no voice lobby; kept for the
@@ -54,7 +54,7 @@ pub const Party = struct {
 pub const Removal = struct {
     party_id: i32 = -1,
     /// Remaining member entity ids (already mutated), for the final snapshot.
-    members: [max_party_members]i32 = .{-1} ** max_party_members,
+    members: [max_party_members]i32 = @splat(-1),
     n: u8 = 0,
     leader_index: u8 = 0,
     changed_entity: i32 = -1,
@@ -63,14 +63,14 @@ pub const Removal = struct {
 
 pub const Manager = struct {
     parties: [max_parties]Party = undefined,
-    used: [max_parties]bool = .{false} ** max_parties,
+    used: [max_parties]bool = @splat(false),
     /// PartyManager.nextPartyID (parties-factions.md §2): starts at 1,
     /// increments per CreateParty.
     next_party_id: i32 = 1,
 
     pub fn init(self: *Manager) void {
         self.* = .{};
-        self.parties = [_]Party{.{}} ** max_parties;
+        self.parties = @as([max_parties]Party, @splat(.{}));
     }
 
     pub fn deinit(self: *Manager) void {

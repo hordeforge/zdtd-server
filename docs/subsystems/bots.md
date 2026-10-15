@@ -49,19 +49,19 @@ The manager is a fixed 16-slot table with no heap on the tick path. Doc comments
 
 ```zig
 pub const BotManager = struct {
+    /// Operator bot policy (`[bots]` config; defaults = historic behaviour).
     cfg: BotHostConfig = .{},
+    /// Deferred zombie-melee damage (ADR 0026 concurrency): the zombie AI
+    /// runs on parallel workers, so melee on bots accumulates as fixed-point
+    /// (atomic adds, same shape as the ECS dmg_fp) plus an atomic last-
+    /// attacker; the main thread drains it into attributed damage after the
+    /// AI pass joins (tick -> drainWorkerDamage), so no worker ever mutates
+    /// hp/events/last_attacker directly. dmg_scale matches systems.zig.
     dmg_scale: u32 = 100,
-    dmg_fp: [max_bots]u32 = .{0} ** max_bots,
-    attacker_fp: [max_bots]std.atomic.Value(i32) = [_]std.atomic.Value(i32){std.atomic.Value(i32).init(-1)} ** max_bots,
-    bots: [max_bots]Bot = [_]Bot{.{}} ** max_bots,
-    n: usize = 0,
-    floor: u32 = 0,
-    floor_src: i16 = 0,
-    events: [max_sense_events]SenseEvent = [_]SenseEvent{.{}} ** max_sense_events,
-    ev_n: usize = 0,
-    loadout: [8]BotWeapon = undefined,
-    loadout_n: usize = 0,
-};
+    dmg_fp: [max_bots]u32 = @splat(0),
+    attacker_fp: [max_bots]std.atomic.Value(i32) = @splat(std.atomic.Value(i32).init(-1)),
+    /// Fixed slot table; slots are recycled on remove (an !alive slot is free).
+    /// MUST be zero-initialized: `spawn` scans `bots[slot].alive` to find a
 ```
 
 `max_bots` is `16` (src/server/game/bot.zig:17). Per-bot weapon profiles are `damage`, `range`, `pellets`, a bounded `tag` and `tag_len`, with a builtin six-gun pool and a config-parsed pool of up to eight (src/server/game/bot.zig:63, 78, 206).
@@ -89,7 +89,7 @@ pub const Bot = struct {
     arrival_dist: f32 = 0.05,
     /// Operator/console display name (bounded, no heap). The stock client needs
     /// an entity_name in the player-mesh spawn body, so bots carry one.
-    name: [24]u8 = .{0} ** 24,
+    name: [24]u8 = @splat(0),
     name_len: usize = 0,
     /// Net id of the last entity that damaged this bot (-1 = none). The guest
     /// reads it indirectly via the damage-event sense trailer (retaliation;

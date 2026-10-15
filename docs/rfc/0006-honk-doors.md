@@ -11,13 +11,22 @@ horn-opens-trader-doors behavior can exist, and where does the policy live?
 
 ## 2. Current state
 
-zdtd has no door simulation. Doors are static blocks in the world store;
-nothing holds an open/closed state, and no C2S or S2C package touches a
-door's state. The vehicle sim (`ecs/systems.zig vehicleControl`) moves
-hulls and drains fuel but has no horn concept. The power/trigger TE system
-(`ecs/electric.zig`) actuates consumers by entity id but has no door
-affordance and no proximity detection. Config: `[rules.vehicle]` exists
-(accel, steer, fuel) and `toml_bind` auto-binds new fields.
+Door state exists. `world/doors.zig` holds `is_open`, the lock blob and the
+auto-close deadline, and `replicate_te.zig` `buildDoorBody` sends the open
+flag the client reads. `ecs/vehicle.zig` `vehicleControl` moves hulls and
+drains fuel. What is missing is the horn. Stock `EntityVehicle.UseHorn`
+(IL=61, `il/full-v3.2.0/_global/EntityVehicle.il.txt`) opens the door
+locally through `HornActivation.Activate()` and fires `onHonkEvent`. No
+package in `docs/network/protocol-packages.md` carries a horn press, and
+zdtd's own `NetPackageVehicleSpawn` control body
+(`wire/stock_vehicle.zig` `vehicle_control_len` = 13) has no spare field.
+A server that opens a door on a signal it never receives would be inventing
+the signal. The block is the C2S horn package, which RE has not named.
+The door and hatch animation package is separate and already relayed:
+`NetPackageAnimateBlock` (read IL=21, `il/full-v3.2.0/_global/NetPackageAnimateBlock.il.txt`)
+is parsed for length by `parseAnimateBlockBody` and fanned out unchanged by
+`handleTrigger`, so a powered door's animation plays for nearby clients. That
+relay carries no authority: the server does not decide whether the door opens.
 
 ## 3. Options considered
 

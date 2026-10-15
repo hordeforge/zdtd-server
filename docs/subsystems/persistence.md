@@ -70,14 +70,14 @@ Every store write goes through one helper, so the crash behaviour is one decisio
 
 ## Chunk files
 
-A chunk is a 16x256x16 column with a dense block plane, optional texture, density and damage planes, and the stock topsoil bitfield. The persisted subset (`src/world/store.zig:100`):
+A chunk is a 16x256x16 column with a dense block plane, optional texture, density and damage planes, and the stock topsoil bitfield. The persisted subset (`src/world/store.zig:220`):
 
 ```zig
 pub const Chunk = struct {
     pos: ChunkPos,
     y_dim: u32 = 256,
-    heights: [256]u8 = .{sea_level} ** 256,
-    topsoil: [32]u8 = [_]u8{0} ** 32,
+    heights: [256]u8 = @splat(sea_level),
+    topsoil: [32]u8 = @splat(0),
     blocks: ?[]u32 = null,
     textures: ?[]u64 = null,
     densities: ?[]u8 = null,

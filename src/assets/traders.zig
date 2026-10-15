@@ -76,12 +76,12 @@ pub const RolledItem = struct {
     /// Rolled pre-installed mods (`createDefaultModItems`, items.md 324):
     /// resolved mod item ids, in install order, already the descending-chance
     /// survivors. Filled by the trader step, which owns the item table.
-    mods: [max_mods]u16 = .{0} ** max_mods,
+    mods: [max_mods]u16 = @splat(0),
     mod_n: u8 = 0,
     /// Unresolved names from `modsToInstall`, parallel to `mods`. The roll
     /// cannot turn a name into an id - `TraderTable` has no item table - so it
     /// records the names and the Game resolves them at the stock step.
-    mod_names: [max_mods][]const u8 = .{""} ** max_mods,
+    mod_names: [max_mods][]const u8 = @splat(""),
 };
 
 /// Stock ItemValue.Modifications holds 4 (InvSlot.mods covers the stock slot
@@ -291,7 +291,7 @@ pub const TraderTable = struct {
         if (depth >= max_group_depth or n.* >= out.len) return;
         const g = self.groupByName(group_name) orelse return;
         if (g.refs.len == 0) return;
-        var used_buf: [max_expand]bool = .{false} ** max_expand;
+        var used_buf: [max_expand]bool = @splat(false);
         const use_unique = g.unique_only or unique;
         const used: ?[]bool = if (use_unique) used_buf[0..g.refs.len] else null;
         var round: i32 = 0;
@@ -344,8 +344,8 @@ pub const TraderTable = struct {
         // unresolved here - only the Game owns the item table to turn a mod
         // name into an id, so the roll records names and the trader step
         // resolves them exactly as it resolves `name`.
-        const mods: [max_mods]u16 = .{0} ** max_mods;
-        var mod_names: [max_mods][]const u8 = .{""} ** max_mods;
+        const mods: [max_mods]u16 = @splat(0);
+        var mod_names: [max_mods][]const u8 = @splat("");
         var mod_n: u8 = 0;
         if (r.mods_to_install.len > 0 and r.mod_chance > 0) {
             var chance = r.mod_chance;
@@ -478,7 +478,7 @@ fn parseItemRefNamed(arena: std.mem.Allocator, body: []const u8, ii: usize, ref_
 /// (TraderItemGroup, loot-economy.md 196). Empty when the attribute is absent.
 fn parseModList(arena: std.mem.Allocator, v: []const u8) []const []const u8 {
     if (v.len == 0) return &.{};
-    var out: [max_mods][]const u8 = .{""} ** max_mods;
+    var out: [max_mods][]const u8 = @splat("");
     var n: usize = 0;
     var it = std.mem.splitScalar(u8, v, ',');
     while (it.next()) |part| {

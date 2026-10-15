@@ -184,8 +184,8 @@ The cache is `World.kind_groups`, one dense ascending slot list per `Kind` (`src
 
 ```zig
 pub const Groups = struct {
-    dense: [n_kinds][max_entities]Slot = .{.{0} ** max_entities} ** n_kinds,
-    len: [n_kinds]u16 = .{0} ** n_kinds,
+    dense: [n_kinds][max_entities]Slot = @splat(@as([max_entities]Slot, @splat(0))),
+    len: [n_kinds]u16 = @splat(0),
 ```
 
 8 kinds x 512 slots x u16 is 8 KB on the `World` struct with no heap and no `World` import, which is what keeps `group.zig` below `world.zig` in the dependency graph (`src/ecs/group.zig:21`). Order is a contract, not an optimisation detail: because `dense[0..len]` is strictly ascending, iterating a group visits the same slots in the same order as the open view scan, and the comments name the behaviours that would change otherwise - nearest-player tie-breaks, capped despawn id lists, turret target selection (`src/ecs/group.zig:9`). `insert` and `remove` are both sorted and both no-ops on a duplicate or absent slot (`src/ecs/group.zig:43`, `src/ecs/group.zig:56`). Because `kind[s]` is written only by `spawnBase`, a slot belongs to exactly one group for its lifetime and never migrates (`src/ecs/group.zig:15`). A slice is invalidated by the next spawn or destroy, so a loop body that mutates uses `copyKindInto` (`src/ecs/query.zig:117`).

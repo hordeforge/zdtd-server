@@ -228,7 +228,7 @@ pub const Chunk = struct {
     /// pins. Points at World.terrain_ids (same lifetime as the World).
     terrain: ?*const TerrainIds = null,
     /// On-disk / stock-wire surface Y (0..255). API returns u16 for headroom.
-    heights: [256]u8 = .{sea_level} ** 256,
+    heights: [256]u8 = @splat(sea_level),
     /// Stock `m_bTopSoilBroken` bitfield (32 bytes, 1 bit per XZ column):
     /// clear = topsoil intact (the client renders the top terrain block via
     /// MicroSplat splat maps), set = disturbed (client uses block textures).
@@ -236,7 +236,7 @@ pub const Chunk = struct {
     /// explosion paths set the bit via `setTopSoilBroken` (RE
     /// Chunk.SetTopSoilBroken IL=36, world-chunks.md). Persisted in ZCH3
     /// (trailing 32 bytes; old files without them load clear).
-    topsoil: [32]u8 = [_]u8{0} ** 32,
+    topsoil: [32]u8 = @splat(0),
     /// Full BlockValue.rawData columns when allocated (lazy). Type = low 16 bits.
     blocks: ?[]u32 = null,
     /// Per-block textureFull paint (parallel to blocks), lazy. 0 = unpainted.
@@ -749,7 +749,7 @@ pub const World = struct {
     chunks: std.AutoHashMapUnmanaged(u64, *Chunk),
     /// One bit per deco chunk whose derived decoration was already written into
     /// the block plane, or loaded with it (see `decoChunkMirrored`).
-    deco_mirrored: [deco_mirrored_bytes]u8 = [_]u8{0} ** deco_mirrored_bytes,
+    deco_mirrored: [deco_mirrored_bytes]u8 = @splat(0),
     world_dir: []u8,
     allocator: std.mem.Allocator,
     heightmap: ?dtm.Heightmap = null,

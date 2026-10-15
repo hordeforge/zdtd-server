@@ -118,7 +118,7 @@ const Entry = struct {
 };
 
 pub const Store = struct {
-    entries: [max_pairs]Entry = [_]Entry{.{}} ** max_pairs,
+    entries: [max_pairs]Entry = @splat(.{}),
 
     /// Index of the entry holding this pair, plus whether it is stored forward
     /// (a=source) or reversed.

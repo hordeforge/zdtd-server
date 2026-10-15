@@ -27,7 +27,7 @@ pub const max_questers: usize = 8;
 
 pub const Lock = struct {
     rect: c.PoiRect = .{},
-    questers: [max_questers]i32 = [_]i32{0} ** max_questers,
+    questers: [max_questers]i32 = @splat(0),
     quester_n: u8 = 0,
     /// QuestLockInstance.IsLocked.
     locked: bool = false,
@@ -73,7 +73,7 @@ pub const Lock = struct {
 };
 
 pub const Table = struct {
-    entries: [max_locks]Lock = [_]Lock{.{}} ** max_locks,
+    entries: [max_locks]Lock = @splat(.{}),
     n: usize = 0,
     /// POI unlock grace (`rules.world.poi_unlock_grace_ticks`, synced at init).
     grace_ticks: u64 = 2000,

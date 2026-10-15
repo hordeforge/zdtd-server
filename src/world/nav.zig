@@ -56,8 +56,8 @@ pub fn findPath(w: *const World, sx: i32, sz: i32, tx: i32, tz: i32, out: []Cell
     const start_surf = cellSurfaceY(w, sx, sz) orelse return 0;
     const target_surf = cellSurfaceY(w, tx, tz) orelse return 0;
 
-    var visited: [max_cells]bool = [_]bool{false} ** max_cells;
-    var parent: [max_cells]i32 = [_]i32{-1} ** max_cells;
+    var visited: [max_cells]bool = @splat(false);
+    var parent: [max_cells]i32 = @splat(-1);
     var frontier: [max_cells]i32 = undefined;
     var front_head: usize = 0;
     var front_tail: usize = 0;

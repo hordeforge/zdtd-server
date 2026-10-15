@@ -50,8 +50,8 @@ pub const QuestData = struct {
     protect_padding: [3]i8 = .{ 0, 0, 0 },
     /// `TeleportVolumeStart` / `TeleportVolumeSize` #-lists, local prefab
     /// cells (start s8, size u8 on the wire). Up to max_teleport_volumes.
-    teleport_start: [max_teleport_volumes][3]i8 = .{.{ 0, 0, 0 }} ** max_teleport_volumes,
-    teleport_size: [max_teleport_volumes][3]u8 = .{.{ 0, 0, 0 }} ** max_teleport_volumes,
+    teleport_start: [max_teleport_volumes][3]i8 = @splat(.{ 0, 0, 0 }),
+    teleport_size: [max_teleport_volumes][3]u8 = @splat(.{ 0, 0, 0 }),
     teleport_n: u8 = 0,
 };
 
@@ -971,7 +971,7 @@ test "parse decoration line" {
     try std.testing.expectEqual(@as(i32, 61), idx.items[0].y);
     try std.testing.expectEqual(@as(i32, 612), idx.items[0].z);
 
-    var h: [256]u8 = .{50} ** 256;
+    var h: [256]u8 = @splat(50);
     // chunk containing -872,612
     const cx = @divFloor(@as(i32, -872), 16);
     const cz = @divFloor(@as(i32, 612), 16);

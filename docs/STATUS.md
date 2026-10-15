@@ -475,9 +475,11 @@ sounds stay silent (zdtd has no server-side AI sound channel yet), the
 `unreachableRange` arm needs moveHelper flags zdtd does not model (window
 stays [min, max]), a target must keep being sensed for Continue (stock
 keeps its cached alive entityTarget), and the ammo's block impact
-(DamageBlock 120) lands on the solid cell the shot retires on. The acid
-pool, the 4 s LifeTime and the ammo's tagged DamageModifier rows (earth 0,
-stone 0.5) are not applied. Gated by four tests: the SetData parse
+(DamageBlock 120) lands on the solid cell the shot retires on, folded by the
+ammo's tagged DamageModifier rows against the block's materials.xml
+damage_category (`drainSpitHits` in `src/server/game/world_tick.zig:443`,
+`scenario vomit block damage folds the ammo DamageModifier by material`).
+The acid pool and the 4 s LifeTime are not applied. Gated by four tests: the SetData parse
 test, the vomit/Extends/Projectile parse test, `system zombie spits at a
 target in its range window and the shot lands` (telegraph 3001, burst
 3000, hp drop, cooldown window) and `ranged attack refuses without a vomit

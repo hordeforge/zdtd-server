@@ -168,7 +168,7 @@ pub const WeatherRange = struct {
 /// One `<weather name= prob= duration= delay= buff=>` group of a biome.
 /// Wire groupIndex is the group's document ordinal inside its own biome.
 pub const WeatherGroup = struct {
-    name_buf: [max_weather_name]u8 = [_]u8{0} ** max_weather_name,
+    name_buf: [max_weather_name]u8 = @splat(0),
     /// 0 when the XML name did not fit the buffer, so it matches no group query.
     name_len: u8 = 0,
     /// Normalized across the biome's groups (BiomeDefinition::SetupWeather).
@@ -177,9 +177,9 @@ pub const WeatherGroup = struct {
     duration: i32 = 3000,
     delay_lo: i32 = 0,
     delay_hi: i32 = 0,
-    range_n: [prob_type_count]u8 = [_]u8{0} ** prob_type_count,
+    range_n: [prob_type_count]u8 = @splat(0),
     ranges: [prob_type_count][max_weather_ranges]WeatherRange =
-        [_][max_weather_ranges]WeatherRange{[_]WeatherRange{.{}} ** max_weather_ranges} ** prob_type_count,
+        @splat(@splat(.{})),
 
     pub fn name(self: *const WeatherGroup) []const u8 {
         return self.name_buf[0..self.name_len];
@@ -193,7 +193,7 @@ pub const WeatherGroup = struct {
 /// Ordered weather groups of one biome (index == wire groupIndex).
 pub const WeatherGroupSet = struct {
     n: u8 = 0,
-    groups: [max_weather_groups]WeatherGroup = [_]WeatherGroup{.{}} ** max_weather_groups,
+    groups: [max_weather_groups]WeatherGroup = @splat(.{}),
 
     /// BiomeDefinition::FindWeatherGroupIndex (asm.il ~1250180): -1 when absent.
     pub fn findIndex(self: *const WeatherGroupSet, group_name: []const u8) ?u8 {
@@ -207,27 +207,27 @@ pub const WeatherGroupSet = struct {
 
 pub const Table = struct {
     /// biomemap id → fill stack (missing → default_stack).
-    stacks: [max_biomemap_id]Stack = [_]Stack{.{}} ** max_biomemap_id,
+    stacks: [max_biomemap_id]Stack = @splat(.{}),
     default_stack: Stack = defaultStack(),
     /// Ordered biomemap ids that have weather groups (for NetPackageWeather body).
     /// Stock InitBiomeWeather (asm.il ~2050437) keeps exactly the biomes with
     /// weatherGroups.Count > 0, which is what sizes the wire body on both ends.
-    weather_ids: [max_weather_biomes]u8 = .{0} ** max_weather_biomes,
+    weather_ids: [max_weather_biomes]u8 = @splat(0),
     /// Parallel to weather_ids.
-    weather_groups: [max_weather_biomes]WeatherGroupSet = [_]WeatherGroupSet{.{}} ** max_weather_biomes,
+    weather_groups: [max_weather_biomes]WeatherGroupSet = @splat(.{}),
     weather_n: u8 = 0,
     /// biomemap id → distant-decoration set (empty when the biome declares none,
     /// or when nothing in it resolved: no fabricated species).
-    decos: [max_biomemap_id]DecoSet = [_]DecoSet{.{}} ** max_biomemap_id,
+    decos: [max_biomemap_id]DecoSet = @splat(.{}),
     /// biomemap id → per-subbiome distant-deco sets + noise windows (GAP 18).
     subs: [max_biomemap_id][max_subs_per_biome]SubBiome =
-        [_][max_subs_per_biome]SubBiome{[_]SubBiome{.{}} ** max_subs_per_biome} ** max_biomemap_id,
-    sub_n: [max_biomemap_id]u8 = .{0} ** max_biomemap_id,
+        @splat(@splat(.{})),
+    sub_n: [max_biomemap_id]u8 = @splat(0),
     /// biomemap id → biome name ("pine_forest", "wasteland", …), for the spawn
     /// system's per-biome entitygroup resolution.
-    names: [max_biomemap_id]?[]const u8 = .{null} ** max_biomemap_id,
+    names: [max_biomemap_id]?[]const u8 = @splat(null),
     /// biome name → gamestage/lootstage modifier row (biomes.xml attrs).
-    mods: [max_biome_mod_rows]BiomeModRow = [_]BiomeModRow{.{}} ** max_biome_mod_rows,
+    mods: [max_biome_mod_rows]BiomeModRow = @splat(.{}),
     mod_n: u8 = 0,
     arena_ptr: ?*std.heap.ArenaAllocator = null,
     loaded: bool = false,
@@ -320,7 +320,7 @@ pub const Table = struct {
             return;
         }
         // Sum fixed depths after each index (for "*" budget).
-        var fixed_after: [max_layers + 1]u32 = .{0} ** (max_layers + 1);
+        var fixed_after: [max_layers + 1]u32 = @splat(0);
         var i: usize = layers.len;
         while (i > 0) {
             i -= 1;
@@ -714,7 +714,7 @@ pub fn loadFromPath(
 
     var table: Table = .{ .arena_ptr = arena_holder };
     // biomemap id → name (duped into the table arena so the names outlive `clean`).
-    var name_by_id: [max_biomemap_id]?[]const u8 = .{null} ** max_biomemap_id;
+    var name_by_id: [max_biomemap_id]?[]const u8 = @splat(null);
     var i: usize = 0;
     while (i < clean.len) {
         const mi = std.mem.findPos(u8, clean, i, "<biomemap") orelse break;

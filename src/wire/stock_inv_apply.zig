@@ -29,7 +29,7 @@ pub fn applyPlayerInventoryBody(
 
     const has_tb = try r.readBool();
     if (has_tb) {
-        var slots: [toolbelt_slots]StockSlot = [_]StockSlot{.{}} ** toolbelt_slots;
+        var slots: [toolbelt_slots]StockSlot = @splat(.{});
         const n = try readItemStackList(&r, slots[0..]);
         var i: usize = 0;
         while (i < toolbelt_slots) : (i += 1) {

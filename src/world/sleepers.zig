@@ -41,7 +41,7 @@ pub const Volume = struct {
     x1: i32 = 0,
     y1: i32 = 0,
     z1: i32 = 0,
-    groups: [max_group_classes]VolumeGroup = [_]VolumeGroup{.{}} ** max_group_classes,
+    groups: [max_group_classes]VolumeGroup = @splat(.{}),
     group_n: u8 = 0,
     /// Once players trigger, stay triggered (no re-spawn spam) until the
     /// stock re-arm: when the group dies, `respawn_time` is set to

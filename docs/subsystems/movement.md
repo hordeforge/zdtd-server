@@ -166,20 +166,20 @@ gets current occupancy replayed (`src/server/game/vehicle.zig:14-71`). The sim c
 hull transform onto every seated rider each tick, offset by 1 in Y, because the client
 parents the rider to the seat itself; a rider whose entity is gone frees the seat, and
 freeing seat 0 stops the vehicle (`src/ecs/vehicle.zig:148-156`). The movement-relevant
-field subset, interior fields trimmed, is (`src/ecs/components.zig:495-510`):
+field subset, interior fields trimmed, is (`src/ecs/components.zig:776`):
 
 ```zig
 pub const Vehicle = struct {
     kind: VehicleKind = .minibike,
+    speed: f32 = 0,
+    fuel: f32 = 100,
     /// Rider net id per seat, -1 when free. Index is the wire slot carried by
     /// NetPackageEntityAttach (asm.il:844620).
-    seats: [max_seats]i32 = [_]i32{-1} ** max_seats,
+    seats: [max_seats]i32 = @splat(-1),
     /// Usable seats, always clamped to 1..max_seats on spawn.
     seat_count: u8 = 1,
+    /// Vertical velocity accumulator for gravity integration (systemVehicles).
     vy: f32 = 0,
-    max_speed: f32 = 0,
-    throttle: f32 = 0,
-    steer: f32 = 0,
 ```
 
 Drive input arrives as a 13-byte zdtd-shaped control body under the stock

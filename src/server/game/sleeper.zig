@@ -270,7 +270,7 @@ fn wakeVolumesAt(self: *Game, events: []const comps.NoiseEvent) void {
 pub fn tickSleeperRearm(self: *Game) void {
     const vols = self.sleepers.volumes.len;
     if (vols == 0) return;
-    var alive: [sleepers_mod.max_volumes]u8 = .{0} ** sleepers_mod.max_volumes;
+    var alive: [sleepers_mod.max_volumes]u8 = @splat(0);
     for (self.sim.kind_groups.slice(.zombie)) |s| {
         // Stock EntityDied fires on death (hp 0), not on the later destroy
         // sweep: a dead-but-not-yet-reaped sleeper no longer counts.
