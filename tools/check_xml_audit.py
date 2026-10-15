@@ -141,6 +141,7 @@ VALUE_ALLOWED = {
     # Split out of ecs/systems.zig; the value moved with the code, so the
     # reasons are per file rather than one entry for the old god-file.
     "ecs/sensing.zig": {"1.6"},  # LOS eye height (not melee range)
+    "ecs/turrets.zig": {"1.6"},  # turret LOS torso height (not melee range)
     "ecs/ai_tasks.zig": {"1.6"},  # entityclasses chase-speed RE conversion
     "ecs/stealth.zig": {"1.6"},  # TickServer attraction-radius sense scale
 }

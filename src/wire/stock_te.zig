@@ -799,8 +799,10 @@ pub fn writeDoorFeature(w: *binary.Writer, is_open: bool) !void {
 
 /// Build a composite land-claim TE body (`TEFeatureLandClaim`): declared module
 /// order, with the one-byte `showBounds` module (`TEFeatureLandClaim.il`
-/// Write IL=381, whose version `18` is persistent-only; `TileEntityComposite`
-/// module order per tile-entities-power.md section 2.2).
+/// Write IL=381, version `18` is persistent-only). V3.2.0 b10
+/// `TEFeatureLandClaim::Write` asm.il IL_0013-001A writes showBounds, and
+/// `TileEntityComposite::write` frames the modules in declared order
+/// (tile-entities-power.md section 2.2).
 pub fn buildLandClaimTeBody(
     buf: []u8,
     handle: u8,
