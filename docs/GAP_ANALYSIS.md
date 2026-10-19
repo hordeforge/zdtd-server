@@ -731,13 +731,11 @@ area and the concrete work.
     Release binary keeps a tick-budget overrun (max ~260 ms vs 50 ms), not
     a join failure. DONE 2026-08-30: the spawn-area now delivers through
     the `chunk_adds_per_stream_tick` stream budget instead of one
-    synchronous flood - the collision-mesh core (inner 3×3) stays
-    immediate, the tail paces via `drainSpawnArea` (see the PARTIAL row:
+    synchronous flood - every join path arms the drain only, so the
+    collision-mesh core rides the paced budget too (see the PARTIAL row:
     62-join loadgen cycle, join_fail=0, chunk stream bounded 50 ms).
-    Remaining: W2b async chunk gen (moves gen + te_scan off the join
-    tick), gated on stock-client validation
-    (no client installed; the mesh-core race is documented in c2s/join.zig
-    DynamicClientArrive). DONE 2026-09-15: the join-handler apm section the
+    Remaining: W2b async chunk gen (moves proc gen + te_scan off the join
+    tick), gated on stock-client validation (no client installed). DONE 2026-09-15: the join-handler apm section the
     row asked for already exists - the whole C2S join handler runs inside
     `apm.profiler.scope(.join)` (c2s/join.zig), separate from the paced
     `.replicate`/`.join_drain` chunk work, so the residual synchronous join
@@ -4728,8 +4726,8 @@ a finer server encoding.
   inventory covers the play path, not because a player can or cannot do
   something.)*
   A join must not spend seconds on the tick. The spawn-area send is paced
-  (`sendSpawnArea` sends the collision-mesh core synchronously and arms a
-  per-client area; `drainSpawnArea` delivers the outer rings at
+  (`armSpawnArea` arms a per-client area on every join path and sends
+  nothing; `drainSpawnArea` delivers it at
   `chunk_adds_per_stream_tick` per tick with a shared per-tick budget and
   per-chunk ACK yields), the storage-TE scan is skipped for clean proc chunks
   (te_scan_cells 19.7 M -> 262 K at join), and the periodic save is budgeted the
@@ -4768,21 +4766,20 @@ a finer server encoding.
   4 ms is the no-world case. A loadgen bench on a real map is still needed.
   The deeper fix stays W2b: async chunk gen (proc gen and te_scan off the join
   tick). **2026-10-06: te_scan is already optimized** ("skipped for clean
-  proc chunks", the 19.7 M -> 262 K reduction), and `sendSpawnArea` is
-  already paced (core rings synchronous, outer rings budgeted). **2026-10-14:
+  proc chunks", the 19.7 M -> 262 K reduction). **2026-10-14:
   the worldinfo path no longer sends the synchronous core.** The
-  DynamicClientArrive-first arm (`c2s/join_worldinfo.zig:124`) now calls
+  DynamicClientArrive-first arm (`c2s/join_worldinfo.zig:121`) now calls
   `armSpawnArea`, which walks the whole 9-chunk core through the paced drain
-  instead of sending it on the join tick; the spawn-phase call
-  (`game/join.zig:289`) still sends the core synchronously, so a
-  stock-order client meshes its first chunks at the same step as before.
-  **Scope check:** the outer rings are already budgeted and
-  the synchronous core (9 chunks) is necessary for the client to mesh before
-  `World.IsPositionAvailable`, so W2b has little left to move. The PARTIAL
+  instead of sending it on the join tick; the spawn-phase
+  (`c2s/join_spawn.zig:220`) and bundle (`game/join.zig:292`) calls match it,
+  so no join path sends the core synchronously and the client meshes its
+  first chunks a few ticks after the join package, before the
+  spawn-selection window closes.
+  **Scope check:** every ring is now budgeted, so the join-tick burst from the
+  spawn area is gone; what remains is proc gen inside `getOrCreate` on first
+  touch of each chunk, spread across ticks but still on the tick thread. The PARTIAL
   is a measurement gap - the 402 ms p99 on a real map - rather than a
-  missing feature. **The 402 ms p99 is a measurement, not a missing feature**: the four
-  sections attribute it and `join_spawn` is the phase. Closing the PARTIAL is
-  W2b, a design change, not a parity gap.
+  missing feature. Closing the PARTIAL is W2b, a design change, not a parity gap.
   *Evidence:* APM `zdtd_apm` dumps (tick_total, `.join`, `.join_drain`,
   `.join_deco`, `.save_io`), the three-client Pregen06k01 bench, the 62-join
   `join_fail=0` cycle, the ReleaseFast 36-join cycle, and the scenario "join

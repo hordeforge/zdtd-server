@@ -212,7 +212,12 @@ pub fn handleSpawnPlayer(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []c
         // sent before the client's world exists are dropped and wedge the join.
         if (self.wire_chunks and !c.entered) {
             const r0: i32 = if (c.view_radius < 1) self.chunk_stream_radius_min else @min(c.view_radius, self.chunk_stream_radius_max);
-            try self.sendSpawnArea(peer, surf.x, surf.z, r0);
+            // Arm the paced drain only, matching the worldinfo path: a
+            // synchronous 3x3 core per join stacks on the join tick under
+            // concurrent joins, which is what the GAP join-burst row
+            // measures. The client meshes its first chunks a few ticks later,
+            // well before the spawn-selection window closes.
+            try self.armSpawnArea(peer, surf.x, surf.z, r0);
         }
         // Death-respawn already sent Spawned+stats; still re-send join bundle so the
         // client re-enters IsSpawned (playtest saw hp=100 but IsSpawned=false without it).

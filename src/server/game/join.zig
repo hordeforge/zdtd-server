@@ -286,7 +286,10 @@ pub fn sendJoinBundle(self: *Game, c: *Client, peer: *ln_peer.Peer, sx: i32, sy:
         try self.sendAllySnapshot(peer);
         if (self.wire_chunks) {
             const r: i32 = if (c.view_radius < 1) self.chunk_stream_radius_min else @min(c.view_radius, self.chunk_stream_radius_max);
-            try self.sendSpawnArea(peer, sx2, sz2, r);
+            // Arm the paced drain only, matching the spawn-phase and worldinfo
+            // calls: a synchronous core ring per join stacks cores under
+            // concurrent joins before the shared drain budget runs.
+            try self.armSpawnArea(peer, sx2, sz2, r);
         }
         // Confirm Spawned after stream (EnterMultiplayer; pos = surface snap).
         const spawned = try packages.buildSpawnedBody(

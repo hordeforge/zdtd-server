@@ -747,8 +747,8 @@ a real client. Confirming the trader paths against a stock client remains
 open.
 `game.zig` delegates to 44 shards in
 `src/server/game/*.zig` aggregated through `src/server/root.zig`, and `c2s/*`
-owns all C2S domains. `GAP_ANALYSIS.md` scores 300 features: **298 `WORKS`,
-2 `PARTIAL`, 0 `MISSING`** (recounted 2026-09-11 from the per-feature markers;
+owns all C2S domains. `GAP_ANALYSIS.md` scores 327 features: **326 `WORKS`,
+1 `PARTIAL`, 0 `MISSING`** (recounted 2026-10-19 from the per-feature markers;
 see its scorecard for the per-area breakdown; 50 bullets carry ad-hoc labels
 and are not counted). Residuals are recorded
 inline per the "missing beats fake" rule - the honest frontier is the
