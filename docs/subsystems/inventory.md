@@ -9,18 +9,23 @@ Sources: [`src/ecs/inventory.zig`](../../src/ecs/inventory.zig), [`src/ecs/inv_l
 One `Inventory` component covers toolbelt, bag, and equipment; the split is pure indexing. The layout constants and their comptime invariants (src/ecs/components.zig:584):
 
 ```zig
-/// Toolbelt 0..9, bag 10..54, equipment 55..66 (armor slots), total 67 -
-/// the full stock wire layout (toolbelt 10, bag 45, equip 12). The earlier
-/// 32-bag subset (ADR 0007) dropped client bag slots 33..45 and equipment
-/// 5..11 on the C2S apply, losing items on relog; resolved 2026-08-22.
 pub const inv_toolbelt: usize = 10;
 pub const inv_bag_start: usize = 10;
 pub const inv_bag_count: usize = 45;
 pub const inv_equip_start: usize = 55;
-pub const inv_equip_count: usize = 12;
-pub const max_inv_slots: usize = inv_equip_start + inv_equip_count; // 67
+/// V3.3.0 b18: `EquipmentSlots` gains `Backpack = 12`, so equipment is 13 wide
+/// (`Count`/`None` move 12 -> 13; changelog §5.1, protocol-packages.md §1.5.5).
+/// The trailing slot is the equipped backpack; the toolbelt stays 10 (stock
+/// play ships 10 slots, changelog §5.2).
+pub const inv_equip_count: usize = 13;
+pub const max_inv_slots: usize = inv_equip_start + inv_equip_count; // 68
 pub const inv_no_holding: u16 = 0xFFFF;
 ```
+
+The slot layout is toolbelt 0..9, bag 10..54, equipment 55..67 (armor plus the
+backpack slot), total 68. The earlier 32-bag subset (ADR 0007) dropped client
+bag slots 33..45 and equipment 5..11 on the C2S apply, losing items on relog;
+resolved 2026-08-22.
 
 A comptime block below those constants fails the build if the bag stops being contiguous with the toolbelt or if `max_inv_slots` diverges from the equip end (src/ecs/components.zig:598). The slot record itself (src/ecs/components.zig:716):
 
@@ -81,7 +86,7 @@ pub const Ledger = struct {
 
 `capacity` is 32 (src/ecs/inv_ledger.zig:17) and the cause set is eight values, `loot`, `craft`, `give`, `place`, `eat`, `drop`, `tx`, `unknown` (src/ecs/inv_ledger.zig:6). Deltas are clamped into `i16`, not truncated, at every call site (src/ecs/inventory.zig:180, 234, 259). All ECS-side writes funnel through `recordInv`, which narrows the peer slot to `u16` and calls `Ledger.record` (src/ecs/inventory.zig:609). The cause mapping is one per operation: `move` records `.tx` (src/ecs/inventory.zig:235), `drop` records `.drop` (src/ecs/inventory.zig:260), `useEx` records `.eat` (src/ecs/inventory.zig:407), `placeBlock` records `.place` (src/ecs/inventory.zig:557), `takeFromContainer` records `.loot` (src/ecs/inventory.zig:487), `putIntoContainer` records `.tx` (src/ecs/inventory.zig:508), and `give` records `.give` (src/ecs/inventory.zig:180). Craft bypasses `recordInv` and appends directly (src/server/game/craft.zig:401), and admin give does the same (src/server/game/step.zig:629). `collectBagFull` records only after the whole bag transferred, so a refused collect leaves no loot credit (src/ecs/inventory.zig:204).
 
-The only read side wired today is the apm counter: the C2S transaction arm samples `total` before and after the apply and adds the difference to `inv_ledger_events` (src/server/c2s/inv_txn.zig:221; src/apm/metrics.zig:46). `Ledger.recent` and `Ledger.last` exist and are covered by unit tests (src/ecs/inv_ledger.zig:50, 63) but have no production caller in this reading, so the ring is written and not yet dumped or persisted; a restart starts it empty.
+The only read side wired today is the apm counter that samples the ledger delta into `inv_ledger_events` (src/apm/metrics.zig:46); the per-transaction read that fed it retired with the b18 transaction packages. `Ledger.recent` and `Ledger.last` exist and are covered by unit tests (src/ecs/inv_ledger.zig:50, 63) but have no production caller in this reading, so the ring is written and not yet dumped or persisted; a restart starts it empty.
 
 ## Stock inventory wire bodies
 
@@ -104,7 +109,9 @@ pub const StockSlot = struct {
     ammo_index: u8 = 0,
 ```
 
-The rest of the wire slot carries the mod id array, per-mod qualities, and the stat array (src/wire/stock_inv.zig:59). Emptiness is `type_id == 0` and encodes as the single byte `0` (src/wire/stock_inv.zig:105); a non-empty value writes save version 9, then a flags byte whose bit 0 means "type is relative to `ItemsStartHere`" and whose bit 2 means a stats array follows, then `UseTimes`, `Quality`, `Meta`, an empty metadata count, the stats, and the mod arrays (src/wire/stock_inv.zig:111). Item ids above `items_start_here` are re-based to relative form on write (src/wire/stock_inv.zig:120) and the installed mods are converted through the same resolver, writing 0 for an unresolvable mod rather than naming the wrong attachment (src/wire/stock_inv.zig:354). `ItemStack` is `count u16` plus the value when the count is non-zero (src/wire/stock_inv.zig:188), `Bag.Write` is version 1, slot count, stacks, a false locked flag, the touched flag, and a false preference flag (src/wire/stock_inv.zig:210), and the equipment section is a `WriteItemValueArray` plus one cosmetic id per slot and an unlocked count (src/wire/stock_inv.zig:220). The player inventory body is the stock section list in write order (src/wire/stock_inv.zig:228):
+The rest of the wire slot carries the mod id array, per-mod qualities, and the stat array (src/wire/stock_inv.zig:59). Emptiness is `type_id == 0` and encodes as the single byte `0` (src/wire/stock_inv.zig:105); a non-empty value writes save version 9, then a flags byte whose bit 0 means "type is relative to `ItemsStartHere`" and whose bit 2 means a stats array follows, then `UseTimes`, `Quality`, `Meta`, an empty metadata count, the stats, and the mod arrays (src/wire/stock_inv.zig:111). Item ids above `items_start_here` are re-based to relative form on write (src/wire/stock_inv.zig:120) and the installed mods are converted through the same resolver, writing 0 for an unresolvable mod rather than naming the wrong attachment (src/wire/stock_inv.zig:354). `ItemStack` is `count u16` plus the value when the count is non-zero (src/wire/stock_inv.zig:188).
+
+Since V3.3.0 b18 the body is three `bool present + blob` sections (protocol-packages.md §1.5.4), each blob framing a versioned container record over an `ItemStackGrid`, then the drag `ItemStack`. `writePlayerInventory` delegates to the blob form (src/wire/stock_inv.zig:319):
 
 ```zig
 pub fn writePlayerInventory(
@@ -114,24 +121,18 @@ pub fn writePlayerInventory(
     equipment: []const StockSlot,
     drag: ?StockSlot,
 ) !void {
-    const has_tb = toolbelt.len > 0;
-    try w.writeBool(has_tb);
-    if (has_tb) try writeItemStackList(w, toolbelt);
-
-    const has_bag = bag.len > 0;
-    try w.writeBool(has_bag);
-    if (has_bag) try writeBag(w, bag, true);
-
-    const has_eq = equipment.len > 0;
-    try w.writeBool(has_eq);
-    if (has_eq) try writeEquipment(w, equipment);
+    // b18 body (§1.5.4): three `bool present + blob` containers over
+    // Inventory/Bag/Equipment.Write, each blob wrapping an ItemStackGrid, then
+    // the drag ItemStack directly (not blobbed).
+    try writePlayerInventoryBlobs(w, toolbelt, bag, equipment, drag, 0);
+}
 ```
 
-`buildFromEcsResolved` pads the toolbelt to 10 and the bag to 45 wire slots, taking the bag from `inv_bag_start` and the equipment from `inv_equip_start` (src/wire/stock_inv.zig:273). Stock treats player `NetPackagePlayerInventory` as C2S only (docs/wire/INVENTORY.md:72), so zdtd never sends it unsolicited: the encoder is reached only through `buildInventorySnap` for a transaction response (src/server/game.zig:2577) and through the container response for a non-player inventory by entity id (src/server/c2s/inv_txn.zig:294). The drag stack is parsed for stream correctness and dropped, because the ECS has no drag slot (src/wire/stock_inv.zig:869, 874). Holding is the one S2C-valid inventory package, built by `writeHoldingItem` as entity id, item stack, and a one-byte holding index (src/wire/stock_inv.zig:256); at join it is sent with an empty stack and only the index, since the PDF already carries the toolbelt (src/server/game/join.zig:728, 751).
+`buildFromEcsResolved` pads the toolbelt to 10 and the bag to 45 wire slots, taking the bag from `inv_bag_start` and the equipment from `inv_equip_start` (src/wire/stock_inv.zig:273). Stock treats player `NetPackagePlayerInventory` as C2S only (docs/wire/INVENTORY.md:72), so zdtd never sends it unsolicited: the encoder (`buildInventoryBodyStock`) is reached only from the scenario suite, matching stock's C2S-only direction. The drag stack is parsed for stream correctness and dropped, because the ECS has no drag slot (src/wire/stock_inv.zig:869, 874). Holding is the one S2C-valid inventory package, built by `writeHoldingItem` as entity id, item stack, and a one-byte holding index (src/wire/stock_inv.zig:256); at join it is sent with an empty stack and only the index, since the PDF already carries the toolbelt (src/server/game/join.zig:728, 751).
 
 ## C2S operations and validation
 
-`handle` claims nine names on the shared contract (src/server/c2s/inv_txn.zig:49): `ItemReload`, `PlayerInventory`, `HoldingItem`, `ItemDrop`, `Bag`, `DropItemsContainer`, `TileEntity`, `InventoryTransactionRequest`, `InventoryDataRequest`. Every arm that mutates inventory or fans a relay out to peers takes the per-client inventory token bucket first and counts `c2s_throttle` when it is empty (src/server/game/rate_limits.zig:29). Container writes are additionally refused for a peer its guard policy quarantined off the container surface (src/server/c2s/inv_txn.zig:294, 902). Ownership is enforced per target kind (src/server/c2s/inv_holding.zig:113):
+The domain's `handle` claims seven names on the shared contract: `ItemReload`, `PlayerInventory`, `HoldingItem`, `ItemDrop`, `Bag`, `DropItemsContainer`, `TileEntity` (src/server/c2s/inv.zig:30, plus the per-file arms). The two V3.2.0 transaction packages (`InventoryTransactionRequest`, `InventoryDataRequest`) were removed in V3.3.0 along with the server-side per-operation validation, so they no longer appear here (see the b18 note below). Every arm that mutates inventory or fans a relay out to peers takes the per-client inventory token bucket first and counts `c2s_throttle` when it is empty (src/server/game/rate_limits.zig:29). Container writes are additionally refused for a peer its guard policy quarantined off the container surface (src/server/c2s/inv_te.zig). Ownership is enforced per target kind (src/server/c2s/inv_holding.zig:113):
 
 ```zig
         } else if (self.sim.slotOfNetId(entity_id)) |si| {
@@ -142,9 +143,25 @@ pub fn writePlayerInventory(
             }
 ```
 
-`PlayerInventory` is the interim client-trusting path: the body is applied over the ECS inventory, then stacks are clamped to the catalog cap and attached mods are scrubbed when they exceed the item's mod-slot curve or fail the installability gate (src/server/c2s/inv_txn.zig:104, 137, 45). The trust decision is ADR 0007 and is recorded as such (docs/AUTHORITY.md:48). Eatable stack loss across the apply is turned back into food, water, and HP through `applyEatProps`, with the per-push cap `rules.c2s.eat_units_per_push` (src/server/c2s/inv_txn.zig:133). `HoldingItem` requires the claimed entity id to be the sender's or zero, writes the held index, and rebroadcasts the re-encoded body to every other peer (src/server/c2s/inv_txn.zig:219, 266). `ItemDrop` reverses the stock type and drops only from a matching player stack; a claimed stack that is not present must not mint an item entity, so a failed drop produces no spawn and no spawn response (src/server/c2s/inv_txn.zig:253, 294). `DropItemsContainer` is accepted and dropped outright: death containers are built from server-owned inventory, never from a client item list (src/server/c2s/inv_te.zig:375). `Bag` targets either the sender's own inventory or a non-player entity, the latter behind a container reach check (src/server/c2s/inv_txn.zig:303, 349). Vehicle baskets take the parsed slots into a fixed array and are clamped like any client-writable slot group (src/server/c2s/inv_te.zig:349, 390).
+`PlayerInventory` is the client-trusting path (ADR 0007): the body is applied over the ECS inventory, then stacks are clamped to the catalog cap and attached mods are scrubbed when they exceed the item's mod-slot curve or fail the installability gate (src/server/c2s/inv_reload.zig:122, 123, 21). The trust decision is recorded as such (docs/AUTHORITY.md:48). Eatable stack loss across the apply is turned back into food, water, and HP through `applyEatProps`, with the per-push cap `rules.c2s.eat_units_per_push` (src/server/c2s/inv_reload.zig:148, 161). `HoldingItem` requires the claimed entity id to be the sender's or zero, writes the held index, and rebroadcasts the re-encoded body to every other peer (src/server/c2s/inv_holding.zig). `ItemDrop` reverses the stock type and drops only from a matching player stack; a claimed stack that is not present must not mint an item entity, so a failed drop produces no spawn and no spawn response (src/server/c2s/inv_holding.zig:44). `DropItemsContainer` is accepted and dropped outright: death containers are built from server-owned inventory, never from a client item list (src/server/c2s/inv_te.zig:33). `Bag` targets either the sender's own inventory or a non-player entity, the latter behind a container reach check (src/server/c2s/inv_holding.zig:93). Vehicle baskets take the parsed slots into a fixed array and are clamped like any client-writable slot group (src/server/c2s/inv_te.zig).
 
-`InventoryTransactionRequest` tries the stock `InventoryTransaction.Write` layout first and falls back to the native eleven-byte form (src/server/c2s/inv_txn.zig:228, 874). The stock arm stages into a copy of the slot array and commits only on success, mirroring stock's apply-then-validate order, and rejects an unresolvable non-empty stack so the success bit stays honest (src/server/c2s/inv_txn.zig:250, 821). On success it clamps, acks with the five-byte response, and on failure counts `c2s_rejects` and releases the peer's other locks (src/server/c2s/inv_txn.zig:299, 868). The native arm dispatches through `invsys.Op` (src/server/c2s/inv_txn.zig:133), guarding `open`/`take`/`put` on the container surface and `place` on the block surface (src/server/c2s/inv_txn.zig:143). A place inside a claim the sender does not own is refunded and reported failed (src/server/c2s/inv_txn.zig:183), a real place goes through `world.setBlockWorld` and is broadcast near (src/server/c2s/inv_txn.zig:191), and a fuel item instead refuels a nearby vehicle or generator, refunding the consumed unit when neither accepts it (src/server/c2s/inv_txn.zig:212). The response body is the native head plus a full inventory snapshot (src/server/c2s/inv_txn.zig:224). `InventoryDataRequest` serves container slots for a GUID keyed world container, rolling its loot on first open, or a non-player entity inventory by id; a player's slots are never echoed (src/server/c2s/inv_txn.zig:252, 1047).
+**V3.3.0 b18: the transaction wire and its per-operation validation are gone.**
+Stock removed `InventoryTransactionRequest`, `InventoryTransactionResponse`,
+`InventoryDataRequest` and `InventoryDataResponse` together with
+`TransactionalInventory`, `InventoryManager` and the hash-gate
+(`ValidateFinalHashes`) that staged an operation set and committed only on
+success (changelog-3.3.0 §5.4, items.md "Inventory transactions"). The client
+now serializes its `inventoryData` / `bagData` / `equipmentData` blobs and
+pushes them through `NetPackagePlayerInventory`; the server applies the state
+without validating each move op by op. In zdtd the world-mutating half of the
+retired ops kept its authoritative paths: a block **place** rides
+`NetPackageSetBlock` (reach, claim, block-id checks), a **drop** rides
+`NetPackageItemDrop` (which only spawns from a stack the sender holds), and a
+container **open** rides the `NetPackageLockTarget` lock request, which rolls
+deferred loot before streaming the grid. Only the pure inventory state (eat,
+equip, craft result) moves through the trusted blob push, an accepted residual
+of ADR 0007. The `inv_txn` handler and the `stock_invtx` transaction parsers
+were retired with the packages.
 
 In `ecs/inventory.zig` the operation algebra is a switch over `Op` (src/ecs/inventory.zig:13) that returns a `Result` carrying not just success but the side effects `Game` must apply: a dropped entity id, a block to place and its coordinates, a fuel amount and item, the post-eat stat values, and the net id of an emptied bag so the Game can clear the owner's backpack marker (src/ecs/inventory.zig:32). `craft` and `scrap` deliberately return false here because they need recipes and the item name map, which live on `Game` (src/ecs/inventory.zig:604). Container take and put check reach on every call, not only on open, with a 3D distance against `rules.world.container_open_range`, so walking away ends the loot session (src/ecs/inventory.zig:432). Both preserve quality and meta through `restoreTaken` when the destination will not accept the stack (src/ecs/inventory.zig:469, 616). `openContainer` refuses an entity that carries the player mask, which stops a peer opening another player's bag and then taking through it (src/ecs/inventory.zig:417).
 

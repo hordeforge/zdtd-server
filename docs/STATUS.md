@@ -1,13 +1,13 @@
 # Status: stock-client join and play path
 
-> **What this is:** the living hub for what actually works today on the V3.2.0 b10 stock-client join and play path, with gate evidence and residual gaps.
+> **What this is:** the living hub for what actually works today on the V3.3.0 b18 stock-client join and play path, with gate evidence and residual gaps.
 
 > **Related:** gaps [GAP_ANALYSIS.md](GAP_ANALYSIS.md) · tasks [WORK_PLAN.md](WORK_PLAN.md) · phases [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) · overview [ARCHITECTURE.md](ARCHITECTURE.md) · wire [wire/PACKAGES.md](wire/PACKAGES.md) · sources [PROVENANCE.md](PROVENANCE.md) · index [INDEX.md](INDEX.md)
 
 **Date pin:** 2026-08-30  
-**Game line:** V 3.x Mono (connected client **V3.2.0 b10**; bundled AssignIds dump is 3.1.0-era, see the refresh item in GAP_ANALYSIS §1a), EAC off  
-**Studied bytes:** the exact stock files the RE pins came from, by sha256 ([PROVENANCE.md](PROVENANCE.md) "Studied bytes"): `Assembly-CSharp.dll` `3737eedc…1d0fc64d`, `entityclasses.xml` `0c95e733…912db0b0`, `traders.xml` `06202f16…31ca40dfcc`, `buffs.xml` `d6c714d7…e72fdab5b1c`. Same version string, different hash = different build = re-pin before trusting value comparisons.
-**Wire delta (V3.1.0 -> V3.2.0):** packed `DamageEntity` flags + `KillXPScale` (breaking), POI metadata packages (Request/Response replace POIAround), `ConfirmSpawnEntity` + `EntityCreationData` requestedBy/requestKey tail, `ItemValue.Activated` -> Flags bitfield (wire-compatible). Grounded in 7dtd-engine-research `docs/changelog-3.2.0.md`.
+**Game line:** V 3.x Mono (connected client **V3.3.0 b18**; bundled AssignIds dump is 3.1.0-era, see the refresh item in GAP_ANALYSIS §1a), EAC off  
+**Studied bytes:** the exact stock files the RE pins came from, by sha256 ([PROVENANCE.md](PROVENANCE.md) "Studied bytes"): `Assembly-CSharp.dll` `e16ff9d5…3ad0beb87`, `entityclasses.xml` `5f930212…`, `traders.xml` `b7d18604…`, `buffs.xml` `08345e0d…`. Same version string, different hash = different build = re-pin before trusting value comparisons.
+**Wire delta (V3.2.0 -> V3.3.0):** package registry 187 -> 184 (six removed: inventory-data and inventory-transaction pairs, lock request and lock response; three added: `NetPackageLockTarget`, `NetPackageSingleSignData`, `NetPackageSignDelete`), `NetPackagePlayerInventory` and `NetPackagePlayerEquipment` carry client-serialized save blobs (b10 per-operation inventory transaction gate gone), 13-slot equipment with backpack, new sign subsystem. Grounded in 7dtd-engine-research `docs/releases/changelog-3.3.0.md`.
 **Validation:** `make check` passes (`zig build test`, fuzz, and
 `lint-architecture: clean`). **Container loot rolls on first open 2026-09-12**:
 the chunk/prefab scan sizes a container's grid from loot.xml only
@@ -783,6 +783,90 @@ This is the hub for "what works now" vs [GAP_ANALYSIS.md](GAP_ANALYSIS.md) (full
 The dated snapshots (waves, batches, earlier feature sweeps) are archived in
 [archive/STATUS_HISTORY.md](archive/STATUS_HISTORY.md). They carry the RE citations and measured numbers
 from when they were written; the live record is the entries above and the ledgers.
+
+### Retarget 2026-10-25: V3.2.0 b10 -> V3.3.0 b18
+
+The stock pin moved to V3.3.0 b18 (Steam build 25661908, `Assembly-CSharp.dll`
+sha256 `e16ff9d5…3ad0beb87`, 11697152 bytes; research
+[releases/changelog-3.3.0.md](https://github.com/hordeforge/7dtd-engine-research/blob/main/docs/releases/changelog-3.3.0.md)).
+Landed so far:
+
+- `src/version.zig` pins (`stock_wire`, `stock_wire_announce`,
+  `stock_wire_gsi_version`, `stock_wire_comp`) and `wire/stock_ids.zig`
+  `VersionInfo` minor/build now report (1, 3, 30, 18) and `V 3.3.0`.
+  `release-check` passes on the new pin.
+- `wire/stock_ids.zig` `default_mappings`: 191 -> 188 names. The six
+  packages the release dropped (InventoryDataRequest/Response,
+  InventoryTransactionRequest/Response, LockRequest, LockResponse) are out;
+  the three it gained (LockTarget, SingleSignData, SignDelete) are in.
+- Studied-bytes table in [PROVENANCE.md](PROVENANCE.md) and the pin statements
+  in AGENTS.md, STATUS.md, GAP_ANALYSIS.md, INDEX.md, ARCHITECTURE.md,
+  ZIG_CLONE.md, IMPLEMENTATION_PLAN.md, RELEASES.md and wire/PACKAGES.md now
+  name b18.
+- **Lock subsystem rewritten to b18.** `wire/stock_lock.zig` now models the
+  one `NetPackageLockTarget` package: an `i32 payloadLen` envelope over the
+  `LockManager` request/response payloads, a tag-prefixed `WorldAddress`
+  (0 None, 1 TileEntity, 2 TEFeature, 3 Entity; no presence byte, no
+  `ILockContext` type-name tail), and per-target response context only on
+  success. The request body is unwrapped in the handler
+  (`unwrapLockTargetPayload`), `firstLockTargetPos` reads the new tag shape,
+  and the over-limit rule changed from a deny to a drop (`LockRequestServer`
+  IL_000E-0014). Every LockResponse/LockRequest send and fixture now uses
+  `NetPackageLockTarget`.
+
+- **Inventory wire moved to b18.** `wire/stock_inv.zig` gained the
+  `ItemStackGrid` serializer (version 2: size, slot count, stacks, locks/prefs
+  flags, touched, owned), the `StreamUtils` blob frame (`i32 len | bytes`), and
+  a rewritten `writePlayerInventory` over three `bool present + blob` sections
+  (Inventory ver 1 + selectedSlot, Bag ver 2, Equipment ver 6 + cosmetics).
+  `wire/stock_inv_apply.zig` reads the same b18 form. `wire.inv_tests` pin the
+  new header and grid offsets.
+
+- **Inventory/container ops moved to b18 carriers.** `inv_txn` retired; loot rolls
+  on the `NetPackageLockTarget` grant; drop/place/equip ride
+  `NetPackageItemDrop`/`NetPackageSetBlock`/blob push (ADR 0007);
+  transaction-semantics tests retire; quarantine on bag and SetBlock.
+
+- **Sign push packages landed.** `SignData.Write` carries the b18 `version=3`
+  head + `sharing` byte so the join `SignDataResponse` parses on a b18 client.
+  New `c2s/signs.zig` handles `NetPackageSingleSignData` (relay, no sender check)
+  and `NetPackageSignDelete` (ownership-gated, then relay), with a scenario.
+
+- **b18 console commands.** `listitems`/`li <substring>` prints the matching item
+  names (`*` for all); `give` gains stock's optional `[quality<=6]` (default 6,
+  applied to quality items) and now requires an amount > 0. Both run at perm 0
+  (the default level), matching stock changelog §7.4.
+
+- **Equipment widened to 13 slots, `NetPackagePlayerEquipment` framed (b18).**
+  `Backpack = 12` makes `inv_equip_count`/`equipment_slots` 13, `max_inv_slots` 68
+  (toolbelt 10, bag 45 unchanged); the body reads `entityId | blobLen | blob`
+  (§1.5.5); docs updated.
+
+**Deliberately not built (b18):** `Services.Analytics` (outbound TFP telemetry
+over HTTPS; a clean-room server does not phone home), the `AssetManagement` asset
+handle layer and the pooled-reader migration (engine internals, no wire change),
+and the stock save-version bumps (`.ttp` 62, `EntityCreationData` 38,
+`TEFeatureStorage` 20, `Bag` 2, `Equipment` 6, `Quest` 9) are stock-server-to-stock-server
+compatibility; zdtd writes its own ZPV/ZCH formats (persistence.md) and never reads
+stock saves, so they do not apply. Spawn-selection/Burst are client UI.
+
+- **Per-player sign libraries persist (b18).** `world/player_signs.zig` stores
+  opaque `SignData` blobs keyed by `(library, guid)` in a `ZPS1` world file;
+  `SingleSignData` upserts, `SignDelete` removes, and the join
+  `SignDataResponse` re-serves them after the prefab catalog. Saved with the
+  other stores, loaded at boot; a scenario pins push -> store -> join-serve.
+
+- **Generator refuel rides the power-source TE (b18).** The InvTx place-op
+  trigger is gone, so refuel is `NetPackageTileEntity` with a
+  `TileEntityPowerSource` ToServer body (`bUserAccessing | AddedFuel | SendSlots`,
+  RE §2.1). `stock_te.parsePowerSourceTeBody` gates on
+  `power_item_type == Generator`; `inv_te` range-checks and folds `AddedFuel`
+  into the node clamped to capacity (`power.addFuelAt`), then
+  `broadcastPowerSourceTe` echoes. It dispatches before the powered trigger so
+  the shared prefix cannot misroute it. Parser round-trips + a scenario pin
+  the push and the clamp.
+
+Still open: GAP rows keep b10 scores (scorecard re-audit pending).
 
 ## Gates (evidence loop)
 

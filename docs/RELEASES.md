@@ -36,7 +36,7 @@ repeats the product version because Zig package metadata requires a literal;
 
 ## Compatibility contract
 
-- **Stock client:** V3.2.0 b10, Mono, EAC off is the current target (the
+- **Stock client:** V3.3.0 b18, Mono, EAC off is the current target (the
   bundled AssignIds dump is still 3.1.0-era; the refresh is tracked in
   GAP_ANALYSIS §1a). The 3.2.0 login gate is live-verified via loadgen. Other
   V3.x builds are unsupported until they appear in the tested matrix.

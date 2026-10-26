@@ -2056,6 +2056,17 @@ pub fn runAdminLine(self: *Game, line: []const u8, source: []const u8) void {
                 return;
             };
             if (self.sim.spawnLootBag(t.x + 1, t.y, t.z + 1, item_id, g.count)) |nid| {
+                // Stock ConsoleCmdGive sets quality (<= 6) on every quality-
+                // carrying item; non-quality items ignore it.
+                if (self.items.byId(item_id)) |d| {
+                    if (d.has_quality) {
+                        if (self.sim.slotOfNetId(nid)) |bs| {
+                            if (self.sim.inventory[bs].slots[0].item_id == item_id) {
+                                self.sim.inventory[bs].slots[0].quality = @min(g.quality, 6);
+                            }
+                        }
+                    }
+                }
                 self.broadcastLootSpawn(nid) catch {};
                 self.adminReply("dropped at player\n");
             } else self.adminReply("give failed\n");
@@ -2212,6 +2223,27 @@ pub fn runAdminLine(self: *Game, line: []const u8, source: []const u8) void {
         .shutdown => {
             self.adminReply("shutting down\n");
             self.running = false;
+        },
+        .listitems => |sub| {
+            // Stock `listitems` / `li` (ConsoleCmdListItems): the item names
+            // containing the substring; `*` lists every name. Bounded so a wide
+            // substring cannot flood the reply sink.
+            const match_all = std.mem.eql(u8, sub, "*");
+            var shown: usize = 0;
+            const max_rows: usize = 512;
+            // The "none" def (id 0) is a placeholder, not an item a player can
+            // list; named so the skip is not a bare-decimal id compare.
+            const none_item_id: u16 = 0;
+            for (self.items.defs) |d| {
+                if (d.id == none_item_id or d.name.len == 0) continue;
+                if (!match_all and std.mem.indexOf(u8, d.name, sub) == null) continue;
+                var lb: [160]u8 = undefined;
+                const ln = std.fmt.bufPrint(&lb, "{s}\n", .{d.name}) catch break;
+                self.adminReply(ln);
+                shown += 1;
+                if (shown >= max_rows) break;
+            }
+            if (shown == 0) self.adminReply("no items matched\n");
         },
         .version => self.adminReply("zdtd " ++ version.product ++ " (" ++ version.stock_wire ++ " wire)\n"),
         .inv => |peer_slot| {

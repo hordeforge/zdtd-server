@@ -355,11 +355,20 @@ test "player inventory flags and toolbelt length" {
     inv.holding = 0;
     const body = try buildFromEcs(&buf, &inv);
     try std.testing.expect(body.len > 20);
+    // b18 header: bool present | i32 blobLen | blob(Inventory.Write).
     try std.testing.expectEqual(@as(u8, 1), body[0]); // has toolbelt
-    // toolbelt list count u16 == 10
-    try std.testing.expectEqual(@as(u16, 10), std.mem.readInt(u16, body[1..3], .little));
+    const blob_len = std.mem.readInt(i32, body[1..5], .little);
+    try std.testing.expect(blob_len > 0);
+    try std.testing.expect(@as(usize, @intCast(blob_len)) + 5 <= body.len);
+    // blob: Inventory.Write version 1 | ItemStackGrid (ver 2 | size | count).
+    try std.testing.expectEqual(@as(u8, 1), body[5]); // Inventory version
+    try std.testing.expectEqual(@as(u16, 2), std.mem.readInt(u16, body[6..8], .little)); // grid version
+    try std.testing.expectEqual(@as(i32, 10), std.mem.readInt(i32, body[8..12], .little)); // grid size.x = slot count
+    try std.testing.expectEqual(@as(i32, 1), std.mem.readInt(i32, body[12..16], .little)); // grid size.y
+    // grid i16 slot count at offset 16..18 == 10
+    try std.testing.expectEqual(@as(i16, 10), std.mem.readInt(i16, body[16..18], .little));
     // first stack count == 1
-    try std.testing.expectEqual(@as(u16, 1), std.mem.readInt(u16, body[3..5], .little));
+    try std.testing.expectEqual(@as(u16, 1), std.mem.readInt(u16, body[18..20], .little));
 }
 
 test "holding item body layout" {
@@ -406,9 +415,10 @@ test "ecs starter kit encodes without overflow" {
     const body = try buildFromEcs(&buf, &inv);
     try std.testing.expect(body.len < buf.len);
     try std.testing.expect(body.len > 100); // padded bag + equipment
-    // Header: has toolbelt + 10-slot toolbelt list (stock shape), not just non-empty.
+    // b18 header: bool present | i32 blobLen, not the b10 inline list count.
     try std.testing.expectEqual(@as(u8, 1), body[0]);
-    try std.testing.expectEqual(@as(u16, 10), std.mem.readInt(u16, body[1..3], .little));
+    const blob_len = std.mem.readInt(i32, body[1..5], .little);
+    try std.testing.expect(blob_len > 0);
     // Round-trip apply so overflow-free encode still carries the three stacks.
     var inv2: components.Inventory = .{};
     const rev = testRevItemId;
@@ -508,8 +518,9 @@ test "C2S apply keeps bag slots past the old 32-slot subset" {
     try std.testing.expectEqual(@as(u16, 20), applied.slots[components.inv_bag_start + 40].count);
     // The stock bag width is 45 and the ECS bag matches it now.
     try std.testing.expectEqual(bag_slots, components.inv_bag_count);
-    // Equip is the stock 12-wide too.
-    try std.testing.expectEqual(@as(usize, 12), components.inv_equip_count);
+    // V3.3.0 b18 equip is the stock 13-wide (EquipmentSlots.Backpack = 12).
+    try std.testing.expectEqual(@as(usize, 13), components.inv_equip_count);
+    try std.testing.expectEqual(equipment_slots, components.inv_equip_count);
 }
 
 test "a bag count wider than the ECS bag does not spill into other slots" {

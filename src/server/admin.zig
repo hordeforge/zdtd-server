@@ -498,7 +498,14 @@ pub const Command = union(enum) {
         /// Name is a slice into the original command line.
         item: []const u8,
         count: u16,
+        /// Stock `give` optional quality (ConsoleCmdGive IL, quality <= 6,
+        /// default 6); only applied to quality-carrying items.
+        quality: u16,
     },
+    /// Stock `listitems <substring>` / `li` (`ConsoleCmdListItems`): print the
+    /// item names containing the substring; `*` lists every name. Substring is
+    /// a slice of the input line.
+    listitems: []const u8,
     tele: struct { peer: usize, x: f32, y: f32, z: f32 },
     say: []const u8,
     /// Force-kill entity by net id (EntityRemove + loot path).
@@ -616,7 +623,9 @@ pub fn usageFor(verb: []const u8) ?[]const u8 {
         return "buffplayer <name|entityId|slot> <buffName>";
     if (std.mem.eql(u8, verb, "junkdrone") or std.mem.eql(u8, verb, "jds"))
         return "junkdrone|jds <log|unstuck|clear>";
-    if (std.mem.eql(u8, verb, "give")) return "give <slot> <itemName|itemId> [count]";
+    if (std.mem.eql(u8, verb, "give")) return "give <slot> <itemName|itemId> <count> [quality<=6]";
+    if (std.mem.eql(u8, verb, "listitems") or std.mem.eql(u8, verb, "li"))
+        return "listitems|li <substring> (* lists every name)";
     if (std.mem.eql(u8, verb, "tele") or std.mem.eql(u8, verb, "tp") or std.mem.eql(u8, verb, "teleport") or std.mem.eql(u8, verb, "teleportplayer"))
         return "tele|tp|teleport|teleportplayer <slot> <x> <y> <z>";
     if (std.mem.eql(u8, verb, "say")) return "say <msg>";
@@ -941,13 +950,30 @@ pub fn parseCommand(line: []const u8) Command {
     if (std.mem.eql(u8, cmd, "give")) {
         const p = it.next() orelse return .{ .bad_args = cmd };
         const i = it.next() orelse return .{ .bad_args = cmd };
-        const c = it.next() orelse "1";
+        const c = it.next() orelse return .{ .bad_args = cmd };
+        // Stock ConsoleCmdGive: amount must parse and be > 0; quality is
+        // optional, must parse as u16 and be <= 6 (default 6).
+        const count = std.fmt.parseInt(u16, c, 10) catch return .{ .bad_args = cmd };
+        if (count == 0) return .{ .bad_args = cmd };
+        var quality: u16 = 6;
+        if (it.next()) |q| {
+            quality = std.fmt.parseInt(u16, q, 10) catch return .{ .bad_args = cmd };
+            if (quality > 6) return .{ .bad_args = cmd };
+        }
         if (it.next() != null) return .{ .bad_args = cmd };
         return .{ .give = .{
             .peer = std.fmt.parseInt(usize, p, 10) catch return .{ .bad_args = cmd },
             .item = i,
-            .count = std.fmt.parseInt(u16, c, 10) catch return .{ .bad_args = cmd },
+            .count = count,
+            .quality = quality,
         } };
+    }
+    // Stock `listitems` / `li` (ConsoleCmdListItems): one substring arg, `*`
+    // for every name.
+    if (std.mem.eql(u8, cmd, "listitems") or std.mem.eql(u8, cmd, "li")) {
+        const sub = it.next() orelse return .{ .bad_args = cmd };
+        if (it.next() != null) return .{ .bad_args = cmd };
+        return .{ .listitems = sub };
     }
     // `tp` matches in-game console / WEBUI docs; same args as `tele`.
     if (std.mem.eql(u8, cmd, "tele") or std.mem.eql(u8, cmd, "tp") or std.mem.eql(u8, cmd, "teleport") or std.mem.eql(u8, cmd, "teleportplayer")) {
@@ -1054,6 +1080,25 @@ test "parse give" {
     try std.testing.expect(cn == .give);
     try std.testing.expectEqualStrings("resourceWood", cn.give.item);
     try std.testing.expectEqual(@as(u16, 10), cn.give.count);
+    // Stock ConsoleCmdGive: quality is optional (default 6) and capped at 6;
+    // amount must be > 0.
+    const cq = parseCommand("give 0 resourceWood 10 4");
+    try std.testing.expect(cq == .give);
+    try std.testing.expectEqual(@as(u16, 4), cq.give.quality);
+    try std.testing.expectEqual(@as(u16, 6), cn.give.quality); // default
+    try std.testing.expect(parseCommand("give 0 resourceWood 0") == .bad_args);
+    try std.testing.expect(parseCommand("give 0 resourceWood 10 7") == .bad_args);
+}
+
+test "parse listitems" {
+    const li = parseCommand("listitems wood");
+    try std.testing.expect(li == .listitems);
+    try std.testing.expectEqualStrings("wood", li.listitems);
+    const la = parseCommand("li *");
+    try std.testing.expect(la == .listitems);
+    try std.testing.expectEqualStrings("*", la.listitems);
+    try std.testing.expect(parseCommand("listitems") == .bad_args);
+    try std.testing.expect(parseCommand("listitems a b") == .bad_args);
 }
 
 test "parse ban kick list" {
@@ -1218,7 +1263,8 @@ test "bad args carry the verb; unknown verbs stay unknown" {
 
 test "commands alias is help; usageFor covers common verbs" {
     try std.testing.expect(parseCommand("commands") == .help);
-    try std.testing.expectEqualStrings("give <slot> <itemName|itemId> [count]", usageFor("give").?);
+    try std.testing.expectEqualStrings("give <slot> <itemName|itemId> <count> [quality<=6]", usageFor("give").?);
+    try std.testing.expectEqualStrings("listitems|li <substring> (* lists every name)", usageFor("listitems").?);
     try std.testing.expectEqualStrings("wipeplayer <name>", usageFor("wipeplayer").?);
     try std.testing.expectEqualStrings("status", usageFor("status").?);
     try std.testing.expectEqualStrings("getgamepref [filter]", usageFor("gg").?);

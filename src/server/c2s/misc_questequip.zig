@@ -10,6 +10,8 @@ const ln_peer = @import("../../litenet/peer.zig");
 const inv_apply = @import("../inv_apply.zig");
 const reverseItemType = game_mod.Game.reverseItemType;
 const relayBodyExcept = @import("misc_relay.zig").relayBodyExcept;
+const stock_inv = @import("../../wire/stock_inv.zig");
+const binary = @import("../../wire/binary.zig");
 
 /// True when `name` is a quest/equipment package and was handled.
 pub fn handleQuestEquip(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, body: []const u8) anyerror!bool {
@@ -38,20 +40,29 @@ pub fn handleQuestEquip(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []co
             self.harness.counters.inc(.c2s_throttle);
             return true;
         }
-        if (body.len < 4) return true;
+        // b18 body (protocol-packages.md §1.5.5): `entityId i32 | blobLen i32 |
+        // blob(Equipment.Write)`. The blob frames the equipment record so a
+        // raw relay can trim exactly to it.
+        if (body.len < 8) return true;
         const eid = std.mem.readInt(i32, body[0..4], .little);
         // Stock ValidEntityIdForSender: the equipment is the sender's own.
         if (eid != c.entity_id) return true;
         const ps = self.sim.playerByPeer(c.slot) orelse return true;
         if (!self.sim.mask[ps].inventory) return true;
-        const eq_len = inv_apply.applyEquipmentBody(body[4..], &self.sim.inventory[ps], reverseItemType, self) catch {
+        var br: binary.Reader = .{ .data = body[4..] };
+        var blob_buf: [2048]u8 = undefined;
+        const blob_n = stock_inv.readBlob(&br, blob_buf[0..]) catch {
             self.harness.counters.inc(.c2s_malformed);
             return true;
         };
-        // Trim to the parsed body: Equipment is variable length (the version
-        // byte picks the slot count and each slot is either one `0` or a full
-        // ItemValue), so a raw relay would forward appended bytes.
-        relayBodyExcept(self, "NetPackagePlayerEquipment", body[0 .. 4 + eq_len], eid, "PlayerEquipment");
+        // The blob body is authoritative: it frames the equipment, so the relay
+        // trims to exactly entityId | blobLen | blob and appended bytes cannot
+        // ride along.
+        _ = inv_apply.applyEquipmentBody(blob_buf[0..blob_n], &self.sim.inventory[ps], reverseItemType, self) catch {
+            self.harness.counters.inc(.c2s_malformed);
+            return true;
+        };
+        relayBodyExcept(self, "NetPackagePlayerEquipment", body[0 .. 8 + blob_n], eid, "PlayerEquipment");
         return true;
     }
     return false;

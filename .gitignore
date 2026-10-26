@@ -39,6 +39,7 @@ assets/fixtures/assignids_v314.txt
 .zdtd_test_*
 
 # Local scratch / agent caches (not product inputs)
+.cache/
 .cache_fixed_block_ids.txt
 .ruff_cache/
 .opencode/

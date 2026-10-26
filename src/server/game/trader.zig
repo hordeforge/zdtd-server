@@ -82,7 +82,7 @@ pub fn tickTraderAreas(self: *Game) void {
                 if (holder < self.clients.len and self.clients[holder].joined) {
                     if (self.clients[holder].peer) |p| {
                         const resp = packages.buildLockResponseUnlock(&self.body_buf, true) catch continue;
-                        self.sendGame(p, "NetPackageLockResponse", resp) catch continue;
+                        self.sendGame(p, "NetPackageLockTarget", resp) catch continue;
                     }
                 }
             }

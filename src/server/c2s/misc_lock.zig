@@ -19,42 +19,33 @@ const plugin_compose = @import("../game/plugin_compose.zig");
 const replicate_te = @import("../game/replicate_te.zig");
 const log = @import("../../util/log.zig");
 
-/// Type 3 lock-target payload: opaque 16 bytes to stock (RE netpackage-bodies.md).
-const lock_target_opaque_len: usize = 16;
-
-/// One NetPackageLockRequest target entry, decoded in stock blob order
-/// (i32 count | (u8 present, u8 type, ...)* per entry).
+/// One `NetPackageLockTarget` address entry, decoded from the `WorldAddress`
+/// tag byte (b18: tag 0 None, 1 TileEntity, 2 TEFeature, 3 Entity; no
+/// presence byte precedes it, protocol-packages.md §1.5.1).
 const LockTarget = union(enum) {
-    /// Type 0 block pos / type 1 prefab pos (prefab name already skipped).
+    /// Tag 1 TileEntity / tag 2 TEFeature (prefab name already skipped).
     pos: [3]i32,
-    /// Type 2 entity id.
+    /// Tag 3 Entity id.
     entity_id: i32,
-    /// Type 3 opaque payload, already skipped.
-    opaque16,
-    /// present == 0: empty slot, no payload.
+    /// Tag 0 None: empty slot, no payload.
     empty,
 };
 
-/// Decode one target entry. null ends the walk: truncated entry or unknown
-/// type. Stock aborts the package read there, so the reader position is
+/// Decode one target address. null ends the walk: truncated entry or unknown
+/// tag. Stock aborts the package read there, so the reader position is
 /// untrustworthy past that point and callers must stop.
 fn nextLockTarget(r: *wire_binary.Reader) ?LockTarget {
-    if ((r.readByte() catch return null) == 0) return .empty;
     const ty = r.readByte() catch return null;
     switch (ty) {
-        0, 1 => {
+        0 => return .empty, // WorldObjectType.None
+        1, 2 => { // TileEntity / TEFeature: Vector3i (+ feature name on 2)
             const x = r.readI32() catch return null;
             const y = r.readI32() catch return null;
             const z = r.readI32() catch return null;
-            if (ty == 1) r.skipString() catch return null;
+            if (ty == 2) r.skipString() catch return null;
             return .{ .pos = .{ x, y, z } };
         },
-        2 => return .{ .entity_id = r.readI32() catch return null },
-        3 => {
-            if (r.remaining() < lock_target_opaque_len) return null;
-            r.pos += lock_target_opaque_len;
-            return .opaque16;
-        },
+        3 => return .{ .entity_id = r.readI32() catch return null }, // Entity
         else => return null,
     }
 }
@@ -71,11 +62,17 @@ pub fn vendingTargetAt(self: *Game, x: i32, y: i32, z: i32) ?vending_mod.PosKey 
 }
 
 pub fn handleLock(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, body: []const u8) anyerror!bool {
-    if (std.mem.eql(u8, name, "NetPackageLockRequest")) {
-        if (packages.parseLockRequest(body)) |req| {
+    if (std.mem.eql(u8, name, "NetPackageLockTarget")) {
+        // The package body is `i32 payloadLen | payload`; strip the framing
+        // before parsing the LockManager request (protocol-packages.md §1.5.1).
+        const payload = packages.unwrapLockTargetPayload(body) catch {
+            self.harness.counters.inc(.c2s_malformed);
+            return true;
+        };
+        if (packages.parseLockRequest(payload)) |req| {
             // Deny acquiring a container lock while quarantined; always let
             // an unlock through so a quarantined peer cannot pin a channel.
-            if (req.locking and self.quarantineDenies(c, .container)) return true;
+            if (req.is_lock and self.quarantineDenies(c, .container)) return true;
             const ch: usize = @min(@as(usize, req.channel), self.lock_channel.len - 1);
             // Stale holder on this channel before grant check.
             if (self.lock_channel[ch] >= 0 and self.lock_granted_ns[ch] != 0) {
@@ -86,7 +83,7 @@ pub fn handleLock(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8
                 packLockPos(p.x, p.y, p.z)
             else
                 0;
-            if (req.locking) {
+            if (req.is_lock) {
                 // Gate 1 (IL=239): any existing entry for this player is invalid
                 // state. Stock force-unlocks everything the player holds and
                 // returns without granting the new request (the ret at IL_0067).
@@ -96,15 +93,17 @@ pub fn handleLock(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8
                     self.releaseAllLocksForPeer(c.slot);
                     return true;
                 }
-                // Gate 2 (IL=239): reject null targets and a span longer than 5.
-                // The refusal still replies: stock sets errorMsg and falls
-                // through to a NetPackageLockResponse with success=false
-                // (IL_0263), so the client's pending lock resolves instead of
-                // hanging on a body that was silently dropped here.
-                if (req.has_null_target or req.target_count > packages.max_lock_targets_declared) {
-                    const msg = if (req.has_null_target) "null target" else "too many targets";
-                    const resp = try packages.buildLockResponseDeny(&self.body_buf, req, msg);
-                    try self.sendGame(peer, "NetPackageLockResponse", resp);
+                // Gate 2 (`LockRequestServer` IL_000E-0014): accept a span of
+                // 1..5. Over-limit logs and **drops** with no reply in b18
+                // (protocol-packages.md §1.5.1); a null target fails closed
+                // with a deny (IL_00BE), so the client's pending lock resolves.
+                if (req.target_count < 1 or req.target_count > packages.max_lock_targets_declared) {
+                    self.harness.counters.inc(.c2s_rejects);
+                    return true;
+                }
+                if (req.has_null_target) {
+                    const resp = try packages.buildLockResponseDeny(&self.body_buf, req, "null target");
+                    try self.sendGame(peer, "NetPackageLockTarget", resp);
                     return true;
                 }
                 // Parse the targets once. An entity target that is a trader
@@ -149,7 +148,7 @@ pub fn handleLock(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8
                 if (trader_slot) |ts| {
                     if (!self.sim.alive[ts] or !self.traderIsOpen(ts)) {
                         const resp = try packages.buildLockResponseDeny(&self.body_buf, req, "closed");
-                        try self.sendGame(peer, "NetPackageLockResponse", resp);
+                        try self.sendGame(peer, "NetPackageLockTarget", resp);
                         return true;
                     }
                 }
@@ -162,14 +161,14 @@ pub fn handleLock(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8
                         if (pk != pos_key) continue;
                         if (self.lock_channel[oi] >= 0) {
                             const resp = try packages.buildLockResponseDeny(&self.body_buf, req, "locked");
-                            try self.sendGame(peer, "NetPackageLockResponse", resp);
+                            try self.sendGame(peer, "NetPackageLockTarget", resp);
                             return true;
                         }
                     }
                 }
                 if (self.lock_channel[ch] >= 0) {
                     const resp = try packages.buildLockResponseDeny(&self.body_buf, req, "locked");
-                    try self.sendGame(peer, "NetPackageLockResponse", resp);
+                    try self.sendGame(peer, "NetPackageLockTarget", resp);
                     return true;
                 }
                 self.lock_channel[ch] = @intCast(c.slot);
@@ -191,21 +190,24 @@ pub fn handleLock(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8
                     systems.questOnTraderOpenFrom(&self.sim, c.slot, self.sim.network_id[ts].id);
                     var ent_buf: [50]packages.TraderStockEntry = undefined;
                     const n = self.stockEntries(ts, &ent_buf);
+                    // EntityTrader.OnLockResponseServer writes TraderData only
+                    // on channel 1 (Trade); Interaction (0) writes nothing
+                    // (EntityTrader.il.txt IL_005B-0082).
                     const resp = try packages.buildLockResponseTrader(&self.body_buf, req, .{
                         // TraderID indexes traders.xml; entity id leaves TraderInfo null.
                         .trader_id = self.sim.trader_stock[ts].trader_info_id,
                         .available_money = self.traderMoney(ts),
                         .entries = ent_buf[0..n],
-                    });
-                    try self.sendGame(peer, "NetPackageLockResponse", resp);
+                    }, req.channel == 1);
+                    try self.sendGame(peer, "NetPackageLockTarget", resp);
                     // Wasm-first: the window-open announcement rides a plugin
                     // (kind 0 = trader open), not native code.
                     plugin_compose.traderEvent(self, c.entity_id, self.sim.network_id[ts].id, 0);
                 } else if (vending_pos) |vp| {
                     // Vending machines are always open (trader_info has no
-                    // hours). The LockResponse carries the machine's
-                    // TraderData under the request's VendingMachineLockContext
-                    // type name; the client opens the trader window from it.
+                    // hours). TileEntityVendingMachine.OnLockResponseServer
+                    // always writes TraderData (no channel gate); the client
+                    // opens the trader window from it.
                     const v = self.vending.get(vp) orelse return true;
                     replicate_te.maybeRestockVending(self, v);
                     var vent_buf: [vending_mod.max_vending_stock]packages.TraderStockEntry = undefined;
@@ -214,21 +216,52 @@ pub fn handleLock(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8
                         .trader_id = v.trader_id,
                         .available_money = v.available_money,
                         .entries = vent_buf[0..vn],
-                    });
-                    try self.sendGame(peer, "NetPackageLockResponse", resp);
+                    }, true);
+                    try self.sendGame(peer, "NetPackageLockTarget", resp);
                     try replicate_te.sendVendingTe(self, peer, vp.x, vp.y, vp.z);
                 } else {
-                    const resp = try packages.buildLockResponseGrant(&self.body_buf, req);
-                    try self.sendGame(peer, "NetPackageLockResponse", resp);
+                    // TEFeatureAbs default OnLockResponseServer is empty (ret);
+                    // a storage target would carry its grid here, but zdtd
+                    // still re-pushes the TE below for the plain grant path.
+                    const resp = try packages.buildLockResponseGrant(&self.body_buf, req, "");
+                    try self.sendGame(peer, "NetPackageLockTarget", resp);
                 }
                 // Re-push TE for any storage container near the first TEFeature target.
+                // Stock's open path is `activate -> lock request -> PopulateTE ->
+                // LootContainerOpened` (loot-economy.md §2), so the deferred loot
+                // roll fires here on the lock grant, before the grid ships.
+                // zdtd adds the edit-reach gate stock omits on this path (rule 20):
+                // a container the player cannot walk to must not roll or stream.
                 if (req.targets_blob.len >= 4) {
+                    var reach_ok = true;
+                    if (self.sim.playerByPeer(c.slot)) |ps| {
+                        reach_ok = self.sim.mask[ps].transform;
+                    }
                     var tr: wire_binary.Reader = .{ .data = req.targets_blob };
                     const n = tr.readI32() catch 0;
                     var ti: i32 = 0;
                     while (ti < n) : (ti += 1) {
                         switch (nextLockTarget(&tr) orelse break) {
                             .pos => |p| {
+                                if (reach_ok) {
+                                    const ps = self.sim.playerByPeer(c.slot).?;
+                                    const ep = self.sim.transform[ps];
+                                    if (self.rejectIfBeyondEditRange(
+                                        c,
+                                        peer.local_id,
+                                        c.entity_id,
+                                        .container,
+                                        ep.x,
+                                        ep.y,
+                                        ep.z,
+                                        @floatFromInt(p[0]),
+                                        @floatFromInt(p[1]),
+                                        @floatFromInt(p[2]),
+                                    )) continue;
+                                }
+                                if (self.containers.get(.{ .x = p[0], .y = p[1], .z = p[2] })) |cont| {
+                                    self.ensureContainerLoot(cont, c.slot);
+                                }
                                 try replicate_te.sendStorageTe(self, peer, p[0], p[1], p[2]);
                                 try replicate_te.sendWorkstationTe(self, peer, p[0], p[1], p[2]);
                                 try replicate_te.sendVendingTe(self, peer, p[0], p[1], p[2]);
@@ -252,10 +285,10 @@ pub fn handleLock(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8
                         self.maybeDestroyContainerOnClose(tp.x, tp.y, tp.z);
                     }
                     const resp = try packages.buildLockResponseUnlock(&self.body_buf, true);
-                    try self.sendGame(peer, "NetPackageLockResponse", resp);
+                    try self.sendGame(peer, "NetPackageLockTarget", resp);
                 } else {
                     const resp = try packages.buildLockResponseUnlock(&self.body_buf, false);
-                    try self.sendGame(peer, "NetPackageLockResponse", resp);
+                    try self.sendGame(peer, "NetPackageLockTarget", resp);
                 }
             }
         } else |_| {

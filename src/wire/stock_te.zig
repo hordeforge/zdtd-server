@@ -1669,6 +1669,204 @@ fn writeVec3i(w: *binary.Writer, v: Vec3i) !void {
 /// Parse a C2S NetPackageTileEntity body as TileEntityPoweredTrigger, i.e.
 /// TileEntity/StreamModeRead.FromClient (2). Untrusted input: every field is
 /// bounded by the declared payload length and a short body is an error.
+/// A `NetPackageTileEntity` carrying a power source's ToServer fuel push
+/// (`TileEntityPowerSource` write IL=98, mode==1, RE
+/// `../7dtd-engine-research/docs/gameplay/tile-entities-power.md` §2.1 and
+/// `il/full-v3.3.0/_global/TileEntityPowerSource.il.txt`). The base
+/// `TileEntityPowered.write` prefix is shared with the trigger; the tail is the
+/// power-source-specific fuel/slot fields.
+pub const PowerSourceTe = struct {
+    handle: u8 = 255,
+    world_x: i32 = 0,
+    world_y: i32 = 0,
+    world_z: i32 = 0,
+    block_id: i32 = 0,
+    is_player_placed: bool = false,
+    power_item_type: u8 = 0,
+    wires: [max_te_wires]Vec3i = @splat(.{}),
+    wire_n: usize = 0,
+    wire_total: u8 = 0,
+    parent: Vec3i = .{},
+    pitch: f32 = 0,
+    yaw: f32 = 0,
+    /// The client marks the window open (`bUserAccessing`).
+    user_accessing: bool = false,
+    /// Fuel the client added (`ClientPowerData.AddedFuel`, u16); the server
+    /// folds it into the generator node and clamps to capacity.
+    added_fuel: u16 = 0,
+    /// Whether the client sent its fuel/battery slots after this field.
+    send_slots: bool = false,
+};
+
+/// Stock `PowerItemTypes.Generator` (RE tile-entities-power.md §2.1); the ToClient
+/// fuel fields are written only for this type (`TileEntityPowerSource.write`
+/// IL_00B0-00D0).
+pub const power_item_type_generator: u8 = 5;
+
+/// The ToClient power-source state the server echoes after a fuel change
+/// (`TileEntityPowerSource.write` mode==2, RE §2.1).
+pub const PowerSourceState = struct {
+    is_player_placed: bool = true,
+    power_item_type: u8 = power_item_type_generator,
+    wires: []const Vec3i = &.{},
+    parent: Vec3i = .{},
+    is_powered: bool = false,
+    pitch: f32 = 0,
+    yaw: f32 = 0,
+    /// `hasPowerSource`: a PowerItem is attached (always true for a real node).
+    has_power_source: bool = true,
+    is_on: bool = false,
+    /// Generator only (`PowerItemTypes.Generator`): MaxFuel / CurrentFuel.
+    max_fuel: u16 = 0,
+    current_fuel: u16 = 0,
+    /// `PowerSource.MaxOutput` / `LastPowerUsed` (u16 on the wire).
+    max_output: u16 = 0,
+    last_power_used: u16 = 0,
+};
+
+/// Build the ToClient `NetPackageTileEntity` for a power source (mode==2):
+/// base `TileEntityPowered` prefix (with IsPowered, mode 2 only) then the
+/// `ClientPowerData` tail. RE `TileEntityPowerSource.write` IL=98 mode==2
+/// (IL_0091-0110).
+pub fn buildPowerSourceTeBody(
+    buf: []u8,
+    handle: u8,
+    world_x: i32,
+    world_y: i32,
+    world_z: i32,
+    te_block_id: i32,
+    st: PowerSourceState,
+) ![]u8 {
+    var payload: [max_te_wires_out * 12 + 64]u8 = undefined;
+    var pw: binary.Writer = .{ .buf = &payload };
+    const lp = localChunkPos(world_x, world_y, world_z);
+    try pw.writeI32(lp.x);
+    try pw.writeI32(lp.y);
+    try pw.writeI32(lp.z);
+    try pw.writeI32(1); // TileEntityPowered constant
+    try pw.writeBool(st.is_player_placed);
+    try pw.writeByte(st.power_item_type);
+    const wire_n = @min(st.wires.len, 255);
+    try pw.writeByte(@intCast(wire_n));
+    for (st.wires[0..wire_n]) |v| try writeVec3i(&pw, v);
+    try writeVec3i(&pw, st.parent);
+    try pw.writeBool(st.is_powered); // IsPowered, mode==2 only (IL_006E-007E)
+    try pw.writeF32(st.pitch);
+    try pw.writeF32(st.yaw);
+    // ClientPowerData tail (IL_0091-0110): hasPowerSource, IsOn, per-type fuel,
+    // Stacks, MaxOutput, LastPowerUsed.
+    try pw.writeBool(st.has_power_source);
+    try pw.writeBool(st.is_on);
+    if (st.power_item_type == power_item_type_generator) {
+        try pw.writeU16(st.max_fuel);
+        try pw.writeU16(st.current_fuel);
+    }
+    try pw.writeU16(0); // Stacks: empty (GameUtils.WriteItemStack count 0)
+    try pw.writeU16(st.max_output);
+    try pw.writeU16(st.last_power_used);
+    const pay = pw.written();
+
+    var w: binary.Writer = .{ .buf = buf };
+    try writeOuterTeHeader(&w, handle, world_x, world_y, world_z, te_block_id, pay.len);
+    try w.writeBytes(pay);
+    return w.written();
+}
+
+/// Build the ToServer `NetPackageTileEntity` fuel push (mode==1), the client
+/// half, for tests and fuzzing; the server only reads it. Field order mirrors
+/// `parsePowerSourceTeBody`.
+pub fn buildPowerSourceTeBodyToServer(
+    buf: []u8,
+    handle: u8,
+    world_x: i32,
+    world_y: i32,
+    world_z: i32,
+    te_block_id: i32,
+    te: PowerSourceTe,
+) ![]u8 {
+    var payload: [max_te_wires_out * 12 + 64]u8 = undefined;
+    var pw: binary.Writer = .{ .buf = &payload };
+    const lp = localChunkPos(world_x, world_y, world_z);
+    try pw.writeI32(lp.x);
+    try pw.writeI32(lp.y);
+    try pw.writeI32(lp.z);
+    try pw.writeI32(1); // TileEntityPowered constant
+    try pw.writeBool(te.is_player_placed);
+    try pw.writeByte(te.power_item_type);
+    try pw.writeByte(@intCast(te.wire_n));
+    for (te.wires[0..te.wire_n]) |v| try writeVec3i(&pw, v);
+    try writeVec3i(&pw, te.parent);
+    try pw.writeF32(te.pitch);
+    try pw.writeF32(te.yaw);
+    // ToServer tail: bUserAccessing, AddedFuel, SendSlots, [ItemSlots].
+    try pw.writeBool(te.user_accessing);
+    try pw.writeU16(te.added_fuel);
+    try pw.writeBool(te.send_slots);
+    if (te.send_slots) try pw.writeU16(0); // empty ItemSlots list
+    const pay = pw.written();
+
+    var w: binary.Writer = .{ .buf = buf };
+    try writeOuterTeHeader(&w, handle, world_x, world_y, world_z, te_block_id, pay.len);
+    try w.writeBytes(pay);
+    return w.written();
+}
+
+/// Parse the ToServer `NetPackageTileEntity` carrying a power source's fuel push
+/// (`TileEntityPowerSource` write IL=98 mode==1, RE
+/// `../7dtd-engine-research/docs/gameplay/tile-entities-power.md` §2.1 and
+/// `../7dtd-engine-research/il/full-v3.3.0/_global/TileEntityPowerSource.il.txt`).
+pub fn parsePowerSourceTeBody(body: []const u8) binary.ReadError!PowerSourceTe {
+    var r: binary.Reader = .{ .data = body };
+    var out: PowerSourceTe = .{};
+    const pay_len = try readOuterTeHeader(&r, &out.handle, &out.world_x, &out.world_y, &out.world_z, &out.block_id);
+    if (r.remaining() < pay_len) return error.EndOfStream;
+    var pr: binary.Reader = .{ .data = r.data[r.pos .. r.pos + pay_len] };
+
+    // TileEntity::write network mode: chunkPos only (3 x i32).
+    _ = try pr.readI32();
+    _ = try pr.readI32();
+    _ = try pr.readI32();
+    // TileEntityPowered.write (IL=60): the constant orientation-follow i32,
+    // isPlayerPlaced, PowerItemType, wire count + wires, parent.
+    _ = try pr.readI32(); // constant 1 ("pitch/yaw follow")
+    out.is_player_placed = try pr.readBool();
+    out.power_item_type = try pr.readByte();
+    // Only a Generator's power source carries the AddedFuel tail; any other
+    // PowerItemTypes value is a different powered TE (trigger, consumer), so
+    // reject it here rather than misreading its type-specific fields.
+    if (out.power_item_type != power_item_type_generator) return error.InvalidString;
+    out.wire_total = try pr.readByte();
+    if (pr.remaining() < @as(usize, out.wire_total) * 12 + 12 + 8) return error.EndOfStream;
+    var i: usize = 0;
+    while (i < out.wire_total) : (i += 1) {
+        const v = try readVec3i(&pr);
+        if (i < out.wires.len) {
+            out.wires[i] = v;
+            out.wire_n = i + 1;
+        }
+    }
+    out.parent = try readVec3i(&pr);
+    // IsPowered is written only when mode==2 (IL_006E-007E); the ToServer
+    // (mode==1) body omits it, then always carries pitch + yaw.
+    out.pitch = try pr.readF32();
+    out.yaw = try pr.readF32();
+    // TileEntityPowerSource.write ToServer tail (IL=98): bUserAccessing,
+    // AddedFuel (zeroed after write), SendSlots, then ItemSlots if SendSlots.
+    out.user_accessing = try pr.readBool();
+    out.added_fuel = try pr.readU16();
+    out.send_slots = try pr.readBool();
+    if (out.send_slots) {
+        // ItemSlots: GameUtils.WriteItemStack (u16 count + stacks). Parsed only
+        // to keep the reader aligned; the fuel add does not consume them here.
+        var slots: [stock_inv.equipment_slots]stock_inv.StockSlot = @splat(.{});
+        _ = try stock_inv.readItemStackList(&pr, slots[0..]);
+    }
+    return out;
+}
+
+/// Parse the ToServer `NetPackageTileEntity` carrying a powered trigger
+/// (`TileEntityPoweredTrigger`, RE `../7dtd-engine-research/docs/gameplay/tile-entities-power.md`
+/// and `asm.il:1322032`). The field order is what `buildPoweredTriggerTeBodyToServer` writes.
 pub fn parsePoweredTriggerTeBody(body: []const u8) binary.ReadError!PoweredTriggerTe {
     var r: binary.Reader = .{ .data = body };
     var out: PoweredTriggerTe = .{};
@@ -1859,4 +2057,48 @@ pub fn buildLightTeBody(buf: []u8, handle: u8, world_x: i32, world_y: i32, world
     try writeOuterTeHeader(&w, handle, world_x, world_y, world_z, te_block_id, pw.written().len);
     try w.writeBytes(pw.written());
     return w.written();
+}
+
+test "power source ToServer fuel push round-trips AddedFuel" {
+    var buf: [512]u8 = undefined;
+    const te: PowerSourceTe = .{
+        .handle = 255,
+        .world_x = 10,
+        .world_y = 70,
+        .world_z = 20,
+        .block_id = 20001,
+        .is_player_placed = true,
+        .power_item_type = power_item_type_generator,
+        .user_accessing = true,
+        .added_fuel = 42,
+        .send_slots = false,
+    };
+    const body = try buildPowerSourceTeBodyToServer(&buf, te.handle, te.world_x, te.world_y, te.world_z, te.block_id, te);
+    const got = try parsePowerSourceTeBody(body);
+    try std.testing.expectEqual(@as(i32, 10), got.world_x);
+    try std.testing.expectEqual(@as(i32, 70), got.world_y);
+    try std.testing.expectEqual(@as(i32, 20), got.world_z);
+    try std.testing.expectEqual(@as(i32, 20001), got.block_id);
+    try std.testing.expectEqual(power_item_type_generator, got.power_item_type);
+    try std.testing.expectEqual(true, got.user_accessing);
+    try std.testing.expectEqual(@as(u16, 42), got.added_fuel);
+    try std.testing.expectEqual(false, got.send_slots);
+}
+
+test "power source ToServer fuel push with slots stays aligned" {
+    var buf: [512]u8 = undefined;
+    const te: PowerSourceTe = .{
+        .handle = 255,
+        .world_x = 1,
+        .world_y = 2,
+        .world_z = 3,
+        .block_id = 9,
+        .power_item_type = power_item_type_generator,
+        .added_fuel = 7,
+        .send_slots = true, // one empty ItemSlots list follows
+    };
+    const body = try buildPowerSourceTeBodyToServer(&buf, te.handle, te.world_x, te.world_y, te.world_z, te.block_id, te);
+    const got = try parsePowerSourceTeBody(body);
+    try std.testing.expectEqual(@as(u16, 7), got.added_fuel);
+    try std.testing.expectEqual(true, got.send_slots);
 }

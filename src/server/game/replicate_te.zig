@@ -276,6 +276,39 @@ pub fn broadcastPoweredTriggerTe(self: *Game, x: i32, y: i32, z: i32) !void {
     try self.broadcastNear("NetPackageTileEntity", body, @floatFromInt(x), @floatFromInt(z), self.interest_range);
 }
 
+/// Echo a power source's post-refuel state to nearby peers (stock rebroadcasts
+/// the TE after a fuel change, `NetPackageTileEntity.Setup(..., mode 2, range 192)`).
+/// The generator's `ClientPowerData` fuel is folded from the sim node.
+pub fn broadcastPowerSourceTe(self: *Game, x: i32, y: i32, z: i32) !void {
+    const ni = self.sim.power.indexOfPosition(x, y, z) orelse return;
+    const node = self.sim.power.nodes[ni];
+    const block_id = try self.world.blockWorld(x, y, z);
+    const props = self.power_registry.lookup(block_id) orelse return;
+    if (props.kind != .generator) return;
+    // Child wire edges (same undirected parent-zero convention as the trigger).
+    var wires: [stock_te.max_te_wires_out]stock_te.Vec3i = undefined;
+    var wire_n: usize = 0;
+    var w: usize = 0;
+    while (w < self.sim.power.wire_n and wire_n < wires.len) : (w += 1) {
+        const wire = self.sim.power.wires[w];
+        const other: u16 = if (wire.a == node.id) wire.b else if (wire.b == node.id) wire.a else continue;
+        const oi = self.sim.power.indexOfId(other) orelse continue;
+        const on = self.sim.power.nodes[oi];
+        wires[wire_n] = .{ .x = on.x, .y = on.y, .z = on.z };
+        wire_n += 1;
+    }
+    const body = try stock_te.buildPowerSourceTeBody(&self.body_buf, 255, x, y, z, block_id, .{
+        .is_powered = node.powered,
+        .is_on = node.on,
+        .wires = wires[0..wire_n],
+        .max_fuel = @intCast(@max(0, @min(std.math.maxInt(u16), @as(u32, @intFromFloat(node.capacity))))),
+        .current_fuel = @intCast(@max(0, @min(std.math.maxInt(u16), @as(u32, @intFromFloat(node.fuel_or_energy))))),
+        .max_output = @intFromFloat(node.watts),
+        .last_power_used = 0,
+    });
+    try self.broadcastNear("NetPackageTileEntity", body, @floatFromInt(x), @floatFromInt(z), self.interest_range);
+}
+
 /// Open/sync a world container to one peer (stock TE body).
 pub fn sendStorageTe(self: *Game, peer: *ln_peer.Peer, x: i32, y: i32, z: i32) !void {
     const cont = self.containers.get(.{ .x = x, .y = y, .z = z }) orelse return;

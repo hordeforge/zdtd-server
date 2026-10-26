@@ -9,8 +9,7 @@ validation, mutation and broadcast steps plus the owning `src/` anchors.
 
 ## 1. Craft (player inventory)
 
-`NetPackageInventoryTransactionRequest` with `op = craft` (c2s/inv.zig)
-calls `tryCraft` → `tryCraftRecipe`. Ingredients are aggregated by ECS item id
+b18 removed the per-operation craft transaction; backpack crafting runs client-side and the result arrives on the `NetPackagePlayerInventory` blob push. The server-side `tryCraft` → `tryCraftRecipe` path remains for the station-independent resolver and the workstation queue. Ingredients are aggregated by ECS item id
 so duplicate or alias ingredient lines are not double-counted; the whole
 transaction is atomic over a snapshot of the bag. On success the output goes
 to the inventory, the ledger records a `.craft` cause, and quest craft

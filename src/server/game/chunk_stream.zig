@@ -1,8 +1,8 @@
-//! Chunk streaming senders, extracted verbatim from game.zig: the join
-//! spawn area burst (sendSpawnArea), the per-tick view-square stream with
-//! add/remove pacing (streamChunksForClient), the per-client streamed-key
-//! membership set, and storage/vending TE delivery per chunk
-//! (sendContainersInChunk).
+//! Chunk streaming senders, extracted verbatim from game.zig: the paced
+//! spawn-area drain (armSpawnArea + drainSpawnArea), the per-tick
+//! view-square stream with add/remove pacing (streamChunksForClient), the
+//! per-client streamed-key membership set, and storage/vending TE delivery
+//! per chunk (sendContainersInChunk).
 
 const std = @import("std");
 const test_tmp = @import("../../util/test_tmp.zig");
@@ -171,79 +171,11 @@ fn ringCell(ring: i32, j: u32) struct { dx: i32, dz: i32 } {
     };
 }
 
-pub fn sendSpawnArea(self: *Game, peer: *ln_peer.Peer, wx: i32, wz: i32, radius: i32) !void {
-    const t = world_store.World.worldToChunk(wx, wz);
-    // Honor radius 0 (single spawn chunk). Cap 17×17 for viewDist 8 mesh core.
-    const r: i32 = @min(@max(radius, 0), self.spawn_area_radius_max);
-    var client_ptr: ?*Client = null;
-    for (&self.clients) |*cl| {
-        if (cl.peer == peer) {
-            client_ptr = cl;
-            break;
-        }
-    }
-    // Collision-mesh core (rings 0..1 = the spawn chunk + its 8 neighbours)
-    // goes out synchronously: the client needs these meshed before
-    // World.IsPositionAvailable succeeds (join comments on
-    // DynamicClientArrive). The outer rings pace through `drainSpawnArea` at
-    // `chunk_adds_per_stream_tick` per tick, so one join cannot stall the
-    // 50 ms tick with a 289-chunk synchronous burst (GAP "Join-burst tick
-    // budget under concurrent load").
-    const core_r: i32 = @min(r, 1);
-    var ring: i32 = 0;
-    while (ring <= core_r) : (ring += 1) {
-        if (ring == 0) {
-            const key = packages.makeChunkKey(t.pos.x, t.pos.z);
-            if (client_ptr) |cl| {
-                if (clientHasStreamed(cl, key)) continue;
-            }
-            if (try self.sendSpawnChunk(peer, t.pos.x, t.pos.z)) {
-                if (client_ptr) |cl| clientAddStreamed(self, cl, key);
-            }
-        } else {
-            const cells: u32 = @intCast(8 * ring);
-            var j: u32 = 0;
-            while (j < cells) : (j += 1) {
-                const cell = ringCell(ring, j);
-                const cx = t.pos.x + cell.dx;
-                const cz = t.pos.z + cell.dz;
-                const key = packages.makeChunkKey(cx, cz);
-                if (client_ptr) |cl| {
-                    if (clientHasStreamed(cl, key)) continue;
-                }
-                if (try self.sendSpawnChunk(peer, cx, cz)) {
-                    if (client_ptr) |cl| clientAddStreamed(self, cl, key);
-                }
-                // Let ACKs land between multi-chunk sends: polling alone races
-                // the loopback RTT, so yield briefly (join-only) to keep the
-                // reliable window draining and other peers' critical packets
-                // interleaved.
-                self.pollNetOnce();
-                clock.sleepNs(join_ack_yield_ns);
-            }
-        }
-    }
-    // Outer rings: arm the paced drain. Idempotent across the two join-phase
-    // call sites (DynamicClientArrive + RequestToSpawnPlayer): a second call
-    // with the same center keeps the drain's ring progress instead of
-    // restarting it.
-    if (r > core_r) {
-        if (client_ptr) |cl| {
-            if (cl.pending_area_r < 0 or cl.pending_area_cx != t.pos.x or cl.pending_area_cz != t.pos.z) {
-                cl.pending_area_r = r;
-                cl.pending_area_cx = t.pos.x;
-                cl.pending_area_cz = t.pos.z;
-                cl.pending_area_ring = core_r + 1;
-                cl.pending_area_idx = 0;
-            }
-        }
-    }
-}
-
-/// Arm the paced spawn-area drain without the synchronous core send. Ring 0
-/// is the center, so the drain walks the spawn chunk outward and the client
-/// meshes its first chunks a few ticks after the join package instead of on
-/// the join tick. Idempotent like `sendSpawnArea`'s arm block.
+/// Arm the paced spawn-area drain. Ring 0 is the center, so the drain walks
+/// the spawn chunk outward and the client meshes its first chunks a few
+/// ticks after the join package instead of on the join tick. Idempotent: a
+/// second call with the same center keeps the drain's ring progress instead
+/// of restarting it.
 pub fn armSpawnArea(self: *Game, peer: *ln_peer.Peer, wx: i32, wz: i32, radius: i32) !void {
     const t = world_store.World.worldToChunk(wx, wz);
     const r: i32 = @min(@max(radius, 0), self.spawn_area_radius_max);

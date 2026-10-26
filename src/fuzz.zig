@@ -299,9 +299,6 @@ fn fuzzPackageDecoders(_: void, smith: *std.testing.Smith) !void {
     _ = packages.parseDamageHead(input) catch null;
     _ = packages.parseChunkBody(input) catch null;
     _ = packages.parseRequestToSpawnPlayer(input) catch null;
-    _ = packages.parseInvTxRequest(input) catch null;
-    _ = packages.parseInvDataRequest(input) catch null;
-    _ = packages.parseInvDataRequestStock(input) catch null;
     _ = packages.parseChunkRemoveBody(input) catch null;
     _ = packages.parseCollectBody(input) catch null;
     // Remaining C2S-reachable parsers. Every one of these is fed straight from
@@ -311,7 +308,6 @@ fn fuzzPackageDecoders(_: void, smith: *std.testing.Smith) !void {
     _ = packages.parseItemReload(input) catch null;
     _ = packages.parseSetBlockTexture(input) catch null;
     _ = packages.parseWaypointInvite(input) catch null;
-    _ = packages.parseStockInvTx(input) catch null;
     _ = packages.parseRagdollInvoke(input) catch null;
     {
         var plat_buf: [packages.platform_user.max_platform_len]u8 = undefined;

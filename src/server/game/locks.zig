@@ -21,20 +21,19 @@ pub fn firstLockTargetPos(targets_blob: []const u8) ?LockPos {
     const n = tr.readI32() catch return null;
     var ti: i32 = 0;
     while (ti < n) : (ti += 1) {
-        const present = tr.readByte() catch return null;
-        if (present == 0) continue;
-        const ty = tr.readByte() catch return null;
-        if (ty == 0 or ty == 1) {
+        // b18 WorldAddress: a tag byte first (no presence byte), then the
+        // type-specific fields (protocol-packages.md §1.5.1).
+        const tag = tr.readByte() catch return null;
+        if (tag == 1 or tag == 2) { // tile_entity / te_feature: Vector3i
             const x = tr.readI32() catch return null;
             const y = tr.readI32() catch return null;
             const z = tr.readI32() catch return null;
             return .{ .x = x, .y = y, .z = z };
-        } else if (ty == 2) {
+        } else if (tag == 3) { // entity: id only, no position
             _ = tr.readI32() catch return null;
-        } else if (ty == 3) {
-            if (tr.remaining() < 16) return null;
-            tr.pos += 16;
-        } else return null;
+        } else { // tag 0 (none) or unknown: nothing follows
+            continue;
+        }
     }
     return null;
 }
@@ -74,7 +73,7 @@ pub fn releaseOtherLocksForPeer(self: *Game, peer_slot: usize, keep_ch: usize) v
             self.harness.counters.inc(.encode_errors);
             continue;
         };
-        self.sendGame(peer, "NetPackageLockResponse", body) catch {
+        self.sendGame(peer, "NetPackageLockTarget", body) catch {
             self.harness.counters.inc(.net_send_errors);
         };
     }
@@ -130,6 +129,6 @@ pub fn clearLocksForPeer(self: *Game, peer_slot: usize) void {
             self.harness.counters.inc(.encode_errors);
             continue;
         };
-        self.broadcastExcept("NetPackageLockResponse", body, peer_slot) catch {};
+        self.broadcastExcept("NetPackageLockTarget", body, peer_slot) catch {};
     }
 }

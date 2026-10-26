@@ -78,6 +78,9 @@ pub const SignEntry = struct {
     next_group: i32 = 0,
     /// .NET DateTime ticks (UTC); 0 is fine for wire.
     modified_ticks: i64 = 0,
+    /// `SignData.SignSharing` byte (Private=0, Selectable=1, Copyable=2);
+    /// written into the b18 SignData blob (signs.md §2).
+    sharing: u8 = 0,
     layers: []const Layer = &.{},
 };
 
@@ -150,6 +153,16 @@ fn attrValue(open_tag: []const u8, key: []const u8) ?[]const u8 {
     const start = i + needle.len;
     const end = std.mem.findPos(u8, open_tag, start, "\"") orelse return null;
     return open_tag[start..end];
+}
+
+/// Parse the `sharing` attribute of a `<sign>` tag into the SignSharing byte
+/// (Private=0, Selectable=1, Copyable=2). Absent or unknown stays Private,
+/// matching SignData.ReadXML's enum default (signs.md §2).
+fn parseSharingAttr(open_tag: []const u8) u8 {
+    const v = attrValue(open_tag, "sharing") orelse return 0;
+    if (std.mem.eql(u8, v, "Selectable")) return 1;
+    if (std.mem.eql(u8, v, "Copyable")) return 2;
+    return 0;
 }
 
 fn parseI32Attr(open_tag: []const u8, key: []const u8, default: i32) i32 {
@@ -323,6 +336,8 @@ fn parseSignsFile(
             .next_text = parseI32Attr(tag, "next_text_id", 0),
             .next_noise = parseI32Attr(tag, "next_noise_id", 0),
             .next_group = parseI32Attr(tag, "next_group_id", 0),
+            // SignData.sharing (signs.md §2); absent means Private=0.
+            .sharing = parseSharingAttr(tag),
             .layers = layers,
         });
     }

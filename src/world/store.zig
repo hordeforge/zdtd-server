@@ -496,27 +496,6 @@ pub const Chunk = struct {
     /// source cell at `LightValue` spreads into the Block nibble of its
     /// neighbours, losing 1 per step, stopping at 0. The 6-neighbour flood is
     /// the standard light rule and matches `GetLightValue`'s `max(sun,
-    /// blockLight)`. Sun is untouched.
-    pub fn spreadBlockLight(c: *Chunk, source: *const maxdamage.Table, idName: *const fn (?*anyopaque, u16) ?[]const u8, id_ctx: ?*anyopaque) void {
-        if (c.lights == null) return;
-        const blocks = c.blocks orelse return;
-        var lz: i32 = 0;
-        while (lz < 16) : (lz += 1) {
-            var lx: i32 = 0;
-            while (lx < 16) : (lx += 1) {
-                var y: i32 = 0;
-                while (y < c.*.y_dim) : (y += 1) {
-                    const idx: usize = @intCast(lx + lz * 16 + y * 256);
-                    if (idx >= blocks.len) continue;
-                    const name = idName(id_ctx, @truncate(blocks[idx])) orelse continue;
-                    const level = source.lightValue(name);
-                    if (level == 0) continue;
-                    spreadFrom(c, lx, y, lz, level);
-                }
-            }
-        }
-    }
-
     /// One BFS from a source cell: fill the Block nibble of every reachable
     /// cell with the remaining level, stopping at 0.
     pub fn spreadFrom(c: *Chunk, sx: i32, sy: i32, sz: i32, level: u8) void {

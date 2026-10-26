@@ -101,6 +101,7 @@ const mcp_mod = @import("mcp_transport.zig");
 const serverinfo_tcp = @import("serverinfo_tcp.zig");
 const containers_mod = @import("../world/containers.zig");
 const signs_mod = @import("../world/signs.zig");
+const player_signs_mod = @import("../world/player_signs.zig");
 const vending_mod = @import("../world/vending.zig");
 const light_te_mod = @import("../world/light_te.zig");
 const workstations_mod = @import("../world/workstations.zig");
@@ -518,6 +519,10 @@ pub const Game = struct {
     /// streams in, so a later joiner sees the authored text. Distinct from
     /// `signs`, the signs.xml catalog.
     sign_texts: signs_mod.SignStore = .{},
+    /// V3.3.0 b18 per-player sign libraries (world/player_signs.zig): the
+    /// opaque `SignData` blobs pushed over `NetPackageSingleSignData`, persisted
+    /// so a drawing made last session reaches a later join.
+    player_signs: player_signs_mod.PlayerSignStore = .{},
     workstations: workstations_mod.WorkstationStore = .{},
     /// `TileEntityCollector` producer state (dew collector, apiary, coop).
     collectors: collectors_mod.Store = .{},
@@ -1168,6 +1173,14 @@ pub const Game = struct {
                 return e;
             }
         };
+
+        self.player_signs.load(self.world.world_dir) catch |e| {
+            if (e != error.OpenFailed) {
+                logPersistErr(self, "load player signs", e);
+                return e;
+            }
+        };
+
         // Vending machines survive restart (vending.zvn); a placed machine that
         // lost its store would silently stop opening.
         self.vending.load(self.world.world_dir) catch |e| {
@@ -1497,10 +1510,6 @@ pub const Game = struct {
 
     pub fn webuiAdminThunk(ctx: *anyopaque, line: []const u8, out: []u8) usize {
         return admin_console.webuiAdminThunk(ctx, line, out);
-    }
-
-    pub fn pollMcp(self: *Game) void {
-        self.mcp.poll();
     }
 
     /// MCP frame handler (mcp_transport.FrameFn): route one client JSON-RPC
@@ -2817,14 +2826,6 @@ pub const Game = struct {
         return admin_console.setCommandLevel(self, verb, level);
     }
 
-    /// Workstation craft output: sim item plus the name the client derives from
-    pub fn buildInventorySnap(self: *Game, c: *Client, buf: []u8) ![]u8 {
-        const ps = self.sim.playerByPeer(c.slot) orelse return error.NoPlayer;
-        if (!self.sim.mask[ps].inventory) return error.NoInv;
-        // Stock body with ItemTable stock types when items.xml is loaded.
-        return packages.buildInventoryBodyStockResolved(buf, &self.sim.inventory[ps], resolveItemType, self);
-    }
-
     pub fn sendItemIdMapping(self: *Game, peer: *ln_peer.Peer) !void {
         return game_config_files.sendItemIdMapping(self, peer);
     }
@@ -3311,10 +3312,6 @@ pub const Game = struct {
     /// has elapsed (game/chunk_fill.zig).
     pub fn sendContainersInChunk(self: *Game, peer: *ln_peer.Peer, cx: i32, cz: i32) !void {
         return game_chunk_stream.sendContainersInChunk(self, peer, cx, cz);
-    }
-
-    pub fn sendSpawnArea(self: *Game, peer: *ln_peer.Peer, wx: i32, wz: i32, radius: i32) !void {
-        return game_chunk_stream.sendSpawnArea(self, peer, wx, wz, radius);
     }
 
     /// Arm the paced spawn-area drain without the synchronous core send.

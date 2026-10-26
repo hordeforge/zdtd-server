@@ -396,6 +396,25 @@ pub const PowerGrid = struct {
         return true;
     }
 
+    /// Fold a client-added fuel amount into the generator at a position
+    /// (stock `TileEntityPowerSource.read` FromClient applies
+    /// `ClientPowerData.AddedFuel` into `PowerGenerator.CurrentFuel`, clamped to
+    /// `MaxFuel`; RE `../7dtd-engine-research/docs/gameplay/tile-entities-power.md`
+    /// §2.1). Returns the fuel actually added (0 when the cell is not a
+    /// capacity-backed generator), and re-resolves on a real add.
+    pub fn addFuelAt(self: *PowerGrid, x: i32, y: i32, z: i32, amount: f32) f32 {
+        if (amount <= 0) return 0;
+        const i = self.indexOfPosition(x, y, z) orelse return 0;
+        const n = &self.nodes[i];
+        if (n.capacity <= 0) return 0; // solar / non-fuel cell
+        const room = @max(0, n.capacity - n.fuel_or_energy);
+        const add = @min(amount, room);
+        if (add <= 0) return 0;
+        n.fuel_or_energy += add;
+        self.resolve();
+        return add;
+    }
+
     /// Advance fuel burn, battery charge/discharge, and trigger timers. Call after resolve intent.
     /// `dt` in seconds. `daylight` gates solar generators (no MaxFuel). Returns true if state changed.
     pub fn tick(self: *PowerGrid, dt: f32, daylight: bool) bool {

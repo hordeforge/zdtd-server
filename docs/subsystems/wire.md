@@ -104,16 +104,17 @@ The matching `default_mappings` array (`src/wire/stock_ids.zig:61`) has 191 name
 
 A duplicated name is a wire fault, not a typo: `StaticStringMap` would keep one entry and shift every later id. The build rejects it at compile time (`src/wire/stock_ids.zig:255`). `id_map` is built with `initComptime`, so `idOf` cannot allocate (`src/wire/stock_ids.zig:272`).
 
-The advertised version triple is pinned to the 3.2.0 wire and must agree with the login gate (`src/wire/stock_ids.zig:279`):
+The advertised version triple is pinned to the 3.3.0 wire and must agree with the login gate (`src/wire/stock_ids.zig:279`):
 
 ```zig
 pub const VersionInfo = struct {
     release_type: u8 = 1,
     major: i32 = 3,
-    /// Raw Minor for the 3.2.0 wire (changelog-3.2.0 §1: minor 10->20,
-    /// §8: build 9->10; version.zig `stock_wire_gsi_version` = "V.3.20.10").
-    minor: i32 = 20,
-    build: i32 = 10,
+    /// Raw Minor for the 3.3.0 wire (changelog-3.3.0 §4.2: Constants..cctor
+    /// becomes (1, 3, 30, 18), so minor 20->30 and build 10->18;
+    /// version.zig `stock_wire_gsi_version` = "V.3.30.18").
+    minor: i32 = 30,
+    build: i32 = 18,
 ```
 
 A name absent from the registry returns `null` from `idOf`, and send helpers fail closed rather than inventing an id (`src/server/game/send_extra.zig:21`).
@@ -138,7 +139,7 @@ Parse-side entry points live in the same modules as their builders, with the sam
 | `stock_localization.zig` | `buildLocalizationBody` |
 | `stock_configfile.zig` | `buildConfigFileBody` |
 | `stock_trade.zig` | `buildTraderDataStock` |
-| `stock_inv.zig` | `ItemValue`/`ItemStack`/`Bag`/`Equipment` encode and parse: `writeItemValue`, `writeItemStackList`, `writeBag`, `writeEquipment`, `writePlayerInventory`, `buildFromEcsResolved`, `buildBagPackage`, `buildPersistentPlayerState`, `parseBagBody` (`src/wire/stock_inv.zig:111`, `src/wire/stock_inv.zig:210`, `src/wire/stock_inv.zig:273`, `src/wire/stock_inv.zig:749`) |
+| `stock_inv.zig` | `ItemValue`/`ItemStack`/`Bag`/`ItemStackGrid` encode and parse: `writeItemValue`, `writeItemStackList`, `writeBag`, `writeItemStackGrid`, `writePlayerInventory`, `buildFromEcsResolved`, `buildBagPackage`, `buildPersistentPlayerState`, `parseBagBody` (`src/wire/stock_inv.zig:111`, `src/wire/stock_inv.zig:210`, `src/wire/stock_inv.zig:273`, `src/wire/stock_inv.zig:749`) |
 | `stock_chunk.zig` | `NetPackageChunk` payload: `buildNetPackageChunkNew` plus the density, terrain-id, and water helpers (`src/wire/stock_chunk.zig:852`) |
 | `stock_entity.zig` | `NetPackageEntitySpawn` (`EntityCreationData`) and `NetPackageWorldSpawnPoints`: `buildEntitySpawnStock`, `writePlayerProfile`, `writeTraderDataBody`, `buildWorldSpawnPointsBody` (`src/wire/stock_entity.zig:363`, `src/wire/stock_entity.zig:347`, `src/wire/stock_entity.zig:510`) |
 | `stock_te.zig` | `NetPackageTileEntity` bodies for storage, sign, workstation, vending, powered trigger, and light, both directions (`src/wire/stock_te.zig:100`, `src/wire/stock_te.zig:583`, `src/wire/stock_te.zig:867`, `src/wire/stock_te.zig:1139`, `src/wire/te_tests.zig:662`) |
@@ -174,7 +175,7 @@ pub const StockSlot = struct {
     /// `SetItemMetaFloat key="charge"` rows write and `CompareItemMetaFloat`
 ```
 
-The matching wire widths are pinned at compile time against the ECS subset (`src/wire/stock_inv.zig:36`): toolbelt 10, bag 45, equipment 12 (`src/wire/stock_inv.zig:23`, `src/wire/stock_inv.zig:30`, `src/wire/stock_inv.zig:33`). The deco object record (`src/wire/stock_deco.zig:59`):
+The matching wire widths are pinned at compile time against the ECS subset (`src/wire/stock_inv.zig:36`): toolbelt 10, bag 45, equipment 13 (`src/wire/stock_inv.zig:23`, `src/wire/stock_inv.zig:30`, `src/wire/stock_inv.zig:33`). The deco object record (`src/wire/stock_deco.zig:59`):
 
 ```zig
 pub const DecoObj = struct {

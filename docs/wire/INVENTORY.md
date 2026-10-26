@@ -21,9 +21,9 @@ stock catalog ([ADR 0015](../adr/0015-ecs-item-id-vs-stock-type.md)).
 |---|---|
 | 0-9 | Toolbelt (holding index must be here) |
 | 10-54 | Bag (**45** slots, the stock wire `bag_slots`; ECS stores the full layout since ADR 0007 was amended) |
-| 55-66 | Equipment (**12** slots, stock `equipment_slots`; armor + mods) |
+| 55-67 | Equipment (**13** slots, stock `equipment_slots`; armor + mods + backpack) |
 
-`holding = 0xFFFF` means empty hands. The ECS array is the full 67-slot stock
+`holding = 0xFFFF` means empty hands. The ECS array is the full 68-slot stock
 layout (`components.max_inv_slots`); wire encode pads only wire-shape gaps
 when building PDF/Bag bodies.
 
@@ -31,7 +31,7 @@ when building PDF/Bag bodies.
 
 ```text
 Inventory {
-  slots[67] { item_id, count, quality, meta }
+  slots[68] { item_id, count, quality, meta }
   holding: u16
   open_container: i32   // net id of open loot bag / TE, or -1
 }
@@ -76,10 +76,10 @@ is available.
 | `NetPackageDropItemsContainer` | C→S | droppedBy i32, entity class string, Vector3, item stacks → multi-item loot bag |
 | `NetPackageTileEntity` | **both** | V3.1.0 outer: handle + pos + **teBlockId:i32** + **len:i32** + composite/storage payload; ZTE1 still accepted as bridge. |
 
-| `NetPackageInventoryTransactionRequest` | C→S | zdtd: op u8, a u16, b u16, qty u16, entity_id i32 |
-| `NetPackageInventoryTransactionResponse` | S→C | zdtd head: ok u8, dropped_entity i32 + stock inventory body |
-| `NetPackageInventoryDataRequest` | C→S | entity_id i32 (open container) |
-| `NetPackageInventoryDataResponse` | S→C | stock inventory body for container entity |
+| `NetPackageInventoryTransactionRequest` | ~~C→S~~ | retired in V3.3.0 b18 (removed with the transaction gate); mutations ride the `NetPackagePlayerInventory` blob |
+| `NetPackageInventoryTransactionResponse` | ~~S→C~~ | retired in V3.3.0 b18 |
+| `NetPackageInventoryDataRequest` | ~~C→S~~ | retired in V3.3.0 b18; container contents ship in the `NetPackageTileEntity` push streamed on lock-open |
+| `NetPackageInventoryDataResponse` | ~~S→C~~ | retired in V3.3.0 b18 |
 | `NetPackageEntityCollect` | **both** | bag entity_id i32 + collector playerId i32 (open+take+vacuum). C2S is gated on `ValidEntityIdForSender(playerId)`. |
 
 ### Stock ItemValue (v9, minimal)

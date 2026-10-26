@@ -31,7 +31,6 @@ pub const stock_motion = @import("stock_motion.zig");
 pub const stock_block = @import("stock_block.zig");
 pub const stock_world = @import("stock_world.zig");
 pub const stock_estats = @import("stock_estats.zig");
-pub const stock_invtx = @import("stock_invtx.zig");
 pub const stock_lock = @import("stock_lock.zig");
 pub const stock_playerid = @import("stock_playerid.zig");
 pub const playerid_tests = @import("playerid_tests.zig");
@@ -100,7 +99,6 @@ test {
     _ = stock_block;
     _ = stock_world;
     _ = stock_estats;
-    _ = stock_invtx;
     _ = stock_props;
     _ = stock_lock;
     _ = stock_playerid;

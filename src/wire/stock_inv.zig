@@ -37,7 +37,9 @@ pub const toolbelt_slots: usize = 10;
 pub const bag_slots: usize = 45;
 
 /// Equipment.m_slots length in ctor.
-pub const equipment_slots: usize = 12;
+/// V3.3.0 b18 `EquipmentSlots.Count` (changelog §5.1): 12 -> 13 with the
+/// `Backpack` slot; the `equipmentData` blob carries 13 cosmetic `i32`s.
+pub const equipment_slots: usize = 13;
 
 // ECS subset must fit stock wire widths (ADR 0007). Mismatch = silent truncate bugs.
 comptime {
@@ -215,16 +217,6 @@ pub fn writeItemStackList(w: *binary.Writer, slots: []const StockSlot) !void {
     for (slots) |s| try writeItemStack(w, s);
 }
 
-/// GameUtils.WriteItemValueArray: count u16 + (bool present, ItemValue?)*n
-pub fn writeItemValueArray(w: *binary.Writer, slots: []const StockSlot) !void {
-    try w.writeU16(@intCast(slots.len));
-    for (slots) |s| {
-        const present = s.type_id != 0;
-        try w.writeBool(present);
-        if (present) try writeItemValue(w, s);
-    }
-}
-
 /// Bag.Write (version 1): byte ver, u16 slot count, stacks, locked=false, touched, prefs=false.
 pub fn writeBag(w: *binary.Writer, slots: []const StockSlot, touched: bool) !void {
     try w.writeByte(1); // Bag.Version path that includes touched + prefs
@@ -235,12 +227,76 @@ pub fn writeBag(w: *binary.Writer, slots: []const StockSlot, touched: bool) !voi
     try w.writeBool(false); // no PreferenceTracker
 }
 
-/// Equipment section of NetPackagePlayerInventory when equipment is present.
-pub fn writeEquipment(w: *binary.Writer, slots: []const StockSlot) !void {
-    try writeItemValueArray(w, slots);
-    // Cosmetic IDs: one i32 per equipment slot (item type id or 0)
-    for (slots) |_| try w.writeI32(0);
-    try w.writeI32(0); // unlocked cosmetics count
+// --- V3.3.0 b18 ItemStackGrid + blob containers (protocol-packages.md §1.5.4).
+
+/// `ItemStackGrid.Write` version (protocol-packages.md §1.5.4: `u16 version = 2`).
+pub const item_stack_grid_version: u16 = 2;
+
+/// `StreamUtils.WriteBlob` (§1.5.4, write IL=16): `i32 length` then the raw
+/// bytes. A zero/negative length reads back as an empty stream. No compression
+/// at this layer. Writes `blob` framed into `w`.
+pub fn writeBlob(w: *binary.Writer, blob: []const u8) !void {
+    try w.writeI32(@intCast(blob.len));
+    try w.writeBytes(blob);
+}
+
+/// Read one `StreamUtils.ReadBlob` payload into `buf`, returning its length
+/// (0 when the declared length is <= 0). Fails closed when the declared length
+/// exceeds `buf` or the remaining input (§1.5.4, ReadBlob IL=21).
+pub fn readBlob(r: *binary.Reader, buf: []u8) binary.ReadError!usize {
+    const len = try r.readI32();
+    if (len <= 0) return 0;
+    const n: usize = @intCast(len);
+    if (n > buf.len or n > r.remaining()) return error.EndOfStream;
+    @memcpy(buf[0..n], r.data[r.pos..][0..n]);
+    r.pos += n;
+    return n;
+}
+
+/// `ItemStackGrid.Write` (§1.5.4, IL=70): `u16 version 2` | `Vector2i` size |
+/// `i16 slotCount` | `slotCount x ItemStack` | `bool hasLocks` (+PackedBool)
+/// | `bool hasPrefs` (+PreferenceTracker) | `u64 worldTimeTouched` |
+/// `bool playerOwned`. The lock and preference records are always absent on
+/// this path (the server owns neither), so both bools are false. The grid
+/// size is the slot count as a degenerate 1-D `Vector2i` (x = count, y = 1);
+/// the reader only consumes it, never indexes by it.
+pub fn writeItemStackGrid(w: *binary.Writer, slots: []const StockSlot) !void {
+    try w.writeU16(item_stack_grid_version);
+    try w.writeI32(@intCast(slots.len)); // Vector2i.x = slot count
+    try w.writeI32(1); // Vector2i.y
+    try w.writeI16(@intCast(slots.len)); // i16 slot count
+    for (slots) |s| try writeItemStack(w, s);
+    try w.writeBool(false); // no slot-lock array
+    try w.writeBool(false); // no preference tracker
+    try w.writeU64(0); // worldTimeTouched (not tracked server-side)
+    try w.writeBool(false); // playerOwned
+}
+
+/// Read one `ItemStackGrid` (b18) into `out`, returning the slot count read
+/// (capped at `out.len`). Validates the version head so a b10 grid (absent) or
+/// a future one fails closed rather than misaligning the stream.
+pub fn readItemStackGrid(r: *binary.Reader, out: []StockSlot) binary.ReadError!usize {
+    const ver = try r.readU16();
+    if (ver != item_stack_grid_version) return error.EndOfStream;
+    _ = try r.readI32(); // Vector2i.x
+    _ = try r.readI32(); // Vector2i.y
+    const count = try r.readI16();
+    if (count < 0) return error.EndOfStream;
+    const n: usize = @intCast(count);
+    var i: usize = 0;
+    while (i < n) : (i += 1) {
+        const s = try readItemStack(r);
+        if (i < out.len) out[i] = s;
+    }
+    // Clear any tail the caller left beyond the read count.
+    while (i < out.len) : (i += 1) out[i] = .{};
+    const has_locks = try r.readBool();
+    if (has_locks) try skipPackedBoolArray(r);
+    const has_prefs = try r.readBool();
+    if (has_prefs) try skipPreferenceTracker(r);
+    _ = try r.readU64(); // worldTimeTouched
+    _ = try r.readBool(); // playerOwned
+    return @min(n, out.len);
 }
 
 /// NetPackagePlayerInventory body (no base PackageId).
@@ -251,24 +307,67 @@ pub fn writePlayerInventory(
     equipment: []const StockSlot,
     drag: ?StockSlot,
 ) !void {
-    const has_tb = toolbelt.len > 0;
-    try w.writeBool(has_tb);
-    if (has_tb) try writeItemStackList(w, toolbelt);
+    // b18 body (§1.5.4): three `bool present + blob` containers over
+    // Inventory/Bag/Equipment.Write, each blob wrapping an ItemStackGrid, then
+    // the drag ItemStack directly (not blobbed).
+    try writePlayerInventoryBlobs(w, toolbelt, bag, equipment, drag, 0);
+}
 
-    const has_bag = bag.len > 0;
-    try w.writeBool(has_bag);
-    if (has_bag) try writeBag(w, bag, true);
-
-    const has_eq = equipment.len > 0;
-    try w.writeBool(has_eq);
-    if (has_eq) try writeEquipment(w, equipment);
-
+/// b18 body with an explicit selected-slot byte (Inventory.Write's trailing
+/// `u8 selectedSlot`); 0 is the stock default when the server tracks no
+/// selection.
+pub fn writePlayerInventoryBlobs(
+    w: *binary.Writer,
+    toolbelt: []const StockSlot,
+    bag: []const StockSlot,
+    equipment: []const StockSlot,
+    drag: ?StockSlot,
+    selected_slot: u8,
+) !void {
+    // inventoryData: Inventory.Write = version 1 | ItemStackGrid | selectedSlot
+    {
+        const has = toolbelt.len > 0;
+        try w.writeBool(has);
+        if (has) {
+            var blob: [4096]u8 = undefined;
+            var bw: binary.Writer = .{ .buf = &blob };
+            try bw.writeByte(1); // Inventory.Write version
+            try writeItemStackGrid(&bw, toolbelt);
+            try bw.writeByte(selected_slot);
+            try writeBlob(w, bw.written());
+        }
+    }
+    // bagData: Bag.Write = version 2 | ItemStackGrid
+    {
+        const has = bag.len > 0;
+        try w.writeBool(has);
+        if (has) {
+            var blob: [8192]u8 = undefined;
+            var bw: binary.Writer = .{ .buf = &blob };
+            try bw.writeByte(2); // Bag.Write version
+            try writeItemStackGrid(&bw, bag);
+            try writeBlob(w, bw.written());
+        }
+    }
+    // equipmentData: Equipment.Write = version 6 | ItemStackGrid |
+    // cosmetics (i32 each) | unlocked count + ids
+    {
+        const has = equipment.len > 0;
+        try w.writeBool(has);
+        if (has) {
+            var blob: [4096]u8 = undefined;
+            var bw: binary.Writer = .{ .buf = &blob };
+            try bw.writeByte(6); // Equipment.Write version
+            try writeItemStackGrid(&bw, equipment);
+            for (equipment) |_| try bw.writeI32(0); // cosmetic id per slot
+            try bw.writeI32(0); // unlocked cosmetic count
+            try writeBlob(w, bw.written());
+        }
+    }
+    // dragAndDropItem: bool + one ItemStack (GameUtils.WriteItemStack).
     const has_drag = drag != null and drag.?.type_id != 0 and drag.?.count != 0;
     try w.writeBool(has_drag);
-    if (has_drag) {
-        var one = [_]StockSlot{drag.?};
-        try writeItemStackList(w, one[0..]);
-    }
+    if (has_drag) try writeItemStack(w, drag.?);
 }
 
 /// NetPackageHoldingItem body: entityId i32, ItemStack, holding index byte.

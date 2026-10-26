@@ -23,12 +23,13 @@ Only imports of another package directory are counted; single-file imports
 | `plugin` | `util` | 6 |
 | `server` | `apm` | 11 |
 | `server` | `assets` | 206 |
-| `server` | `ecs` | 176 |
+| `server` | `ecs` | 171 |
 | `server` | `litenet` | 82 |
 | `server` | `plugin` | 16 |
-| `server` | `server/game` | 33 |
-| `server` | `util` | 189 |
-| `server` | `wire` | 158 |
+| `server` | `server` | 1 |
+| `server` | `server/game` | 32 |
+| `server` | `util` | 190 |
+| `server` | `wire` | 160 |
 | `server` | `world` | 108 |
 | `wire` | `assets` | 13 |
 | `wire` | `ecs` | 5 |
@@ -36,7 +37,7 @@ Only imports of another package directory are counted; single-file imports
 | `wire` | `world` | 5 |
 | `world` | `assets` | 24 |
 | `world` | `ecs` | 6 |
-| `world` | `util` | 41 |
+| `world` | `util` | 43 |
 
 
 ## Enforced edges (`scripts/lint-architecture.sh`)
@@ -70,6 +71,7 @@ graph LR
   server --> ecs
   server --> litenet
   server --> plugin
+  server --> server
   server --> server/game
   server --> util
   server --> wire

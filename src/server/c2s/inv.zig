@@ -9,7 +9,6 @@
 const inv_reload = @import("inv_reload.zig");
 const inv_holding = @import("inv_holding.zig");
 const inv_te = @import("inv_te.zig");
-const inv_txn = @import("inv_txn.zig");
 const game_mod = @import("../game.zig");
 const Game = game_mod.Game;
 const Client = game_mod.Client;
@@ -32,6 +31,5 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
     if (try inv_reload.handleReload(self, c, peer, name, body)) return true;
     if (try inv_holding.handleHolding(self, c, peer, name, body)) return true;
     if (try inv_te.handleTe(self, c, peer, name, body)) return true;
-    if (try inv_txn.handleTxn(self, c, peer, name, body)) return true;
     return false;
 }

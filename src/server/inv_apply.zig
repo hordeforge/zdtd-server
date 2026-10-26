@@ -172,8 +172,8 @@ test "applyEquipmentBody parses the standalone equipment body" {
     // field would carry | 12 x cosmetic i32 | i32 unlocked | unlocked x i32.
     var buf: [1024]u8 = undefined;
     var w = binary.Writer{ .buf = &buf };
-    try w.writeByte(4); // Equipment version -> 12 slots
-    for (0..12) |i| {
+    try w.writeByte(4); // Equipment version -> equipment_slots (13 in b18)
+    for (0..stock_inv.equipment_slots) |i| {
         if (i == 2) {
             // Absolute stock type (items_start_here + relative); fallbackEcsId
             // maps it back to the relative ECS id.
@@ -182,13 +182,13 @@ test "applyEquipmentBody parses the standalone equipment body" {
             try w.writeByte(0); // null ItemValue
         }
     }
-    for (0..12) |_| try w.writeI32(0); // cosmetics
+    for (0..stock_inv.equipment_slots) |_| try w.writeI32(0); // cosmetics
     try w.writeI32(0); // unlocked count
     var inv: components.Inventory = .{};
     const used = try applyEquipmentBody(w.written(), &inv, null, null);
     try std.testing.expectEqual(@as(u16, 5), inv.slots[components.inv_equip_start + 2].item_id);
     try std.testing.expectEqual(@as(u16, 0), inv.slots[components.inv_equip_start + 0].item_id);
-    try std.testing.expectEqual(@as(u16, 0), inv.slots[components.inv_equip_start + 11].item_id);
+    try std.testing.expectEqual(@as(u16, 0), inv.slots[components.inv_equip_start + stock_inv.equipment_slots - 1].item_id);
     // The whole body is consumed, so a relay can trim to it.
     try std.testing.expectEqual(w.written().len, used);
 

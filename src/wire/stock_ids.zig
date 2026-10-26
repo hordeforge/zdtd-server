@@ -47,10 +47,6 @@ pub const PackageName = enum {
     NetPackageGameStats,
     NetPackageIdMapping,
     NetPackageEntityCollect,
-    NetPackageInventoryTransactionRequest,
-    NetPackageInventoryTransactionResponse,
-    NetPackageInventoryDataRequest,
-    NetPackageInventoryDataResponse,
     NetPackageItemDrop,
     NetPackageBag,
     NetPackageDropItemsContainer,
@@ -95,10 +91,6 @@ pub const default_mappings = [_][]const u8{
     "NetPackageGameStats",
     "NetPackageIdMapping",
     "NetPackageEntityCollect",
-    "NetPackageInventoryTransactionRequest",
-    "NetPackageInventoryTransactionResponse",
-    "NetPackageInventoryDataRequest",
-    "NetPackageInventoryDataResponse",
     "NetPackageItemDrop",
     "NetPackageBag",
     "NetPackageDropItemsContainer",
@@ -186,8 +178,7 @@ pub const default_mappings = [_][]const u8{
     "NetPackageLobbyJoin",
     "NetPackageLobbyRegisterClient",
     "NetPackageLocalization",
-    "NetPackageLockRequest",
-    "NetPackageLockResponse",
+    "NetPackageLockTarget",
     "NetPackageMapChunks",
     "NetPackageMapPosition",
     "NetPackageMinEventFire",
@@ -228,6 +219,8 @@ pub const default_mappings = [_][]const u8{
     "NetPackageShowToolbeltMessage",
     "NetPackageSignDataRequest",
     "NetPackageSignDataResponse",
+    "NetPackageSignDelete",
+    "NetPackageSingleSignData",
     "NetPackageSimpleRPC",
     "NetPackageSleeperPassiveChange",
     "NetPackageSleeperPose",
@@ -279,13 +272,14 @@ pub fn idOf(name: []const u8) ?u16 {
 pub const VersionInfo = struct {
     release_type: u8 = 1,
     major: i32 = 3,
-    /// Raw Minor for the 3.2.0 wire (changelog-3.2.0 §1: minor 10->20,
-    /// §8: build 9->10; version.zig `stock_wire_gsi_version` = "V.3.20.10").
-    /// The client derives the display form ("V 3.2.0") from these numbers and
+    /// Raw Minor for the 3.3.0 wire (changelog-3.3.0 §4.2: Constants..cctor
+    /// becomes (1, 3, 30, 18), so minor 20->30 and build 10->18;
+    /// version.zig `stock_wire_gsi_version` = "V.3.30.18").
+    /// The client derives the display form ("V 3.3.0") from these numbers and
     /// echoes it back in the login package, so the PackageIds numeric
     /// version must match the login gate (`stock_wire_comp`) exactly.
-    minor: i32 = 20,
-    build: i32 = 10,
+    minor: i32 = 30,
+    build: i32 = 18,
 
     pub fn write(self: VersionInfo, w: *binary.Writer) !void {
         try w.writeByte(self.release_type);
@@ -317,10 +311,9 @@ test "package ids body" {
     var r: binary.Reader = .{ .data = body };
     try std.testing.expectEqual(@as(u8, 1), try r.readByte());
     try std.testing.expectEqual(@as(i32, 3), try r.readI32());
-    // 3.2.0 raw numbers (changelog-3.2.0 §1: minor 10->20, build 14->9;
-    // §8: build 9->10). A client derives "V 3.2.0" from these and echoes it
-    // in the login.
-    try std.testing.expectEqual(@as(i32, 20), try r.readI32());
-    try std.testing.expectEqual(@as(i32, 10), try r.readI32());
+    // 3.3.0 raw numbers (changelog-3.3.0 §4.2: Constants..cctor = (1, 3, 30, 18)).
+    // A client derives "V 3.3.0" from these and echoes it in the login.
+    try std.testing.expectEqual(@as(i32, 30), try r.readI32());
+    try std.testing.expectEqual(@as(i32, 18), try r.readI32());
     try std.testing.expectEqual(@as(i32, @intCast(default_mappings.len)), try r.readI32());
 }

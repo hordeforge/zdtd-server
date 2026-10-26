@@ -104,6 +104,52 @@ fn freshScenarioDir(dir: []const u8) void {
     io_fs.mkdirPath(dir);
 }
 
+/// Inject a V3.3.0 `NetPackageLockTarget` lock request for a tile-entity
+/// target at (x,y,z) on `channel`, the b18 carrier for opening a container
+/// (stock `activate -> lock request -> PopulateTE -> LootContainerOpened`,
+/// loot-economy.md §2). `frame_buf` must hold the framed body plus transport.
+fn injectLockOpen(
+    g: *game_mod.Game,
+    c: *game_mod.Client,
+    frame_buf: []u8,
+    channel: u16,
+    x: i32,
+    y: i32,
+    z: i32,
+) !void {
+    var payload: [64]u8 = undefined;
+    var w: binary.Writer = .{ .buf = &payload };
+    try w.writeBool(true); // isLock
+    try w.writeU16(channel);
+    try w.writeI32(1); // one target
+    try w.writeByte(1); // WorldObjectType.tile_entity
+    try w.writeI32(x);
+    try w.writeI32(y);
+    try w.writeI32(z);
+    var body: [64]u8 = undefined;
+    const framed_body = try packages.frameLockTarget(&body, w.written());
+    try g.injectFramed(c, try packages.framed(frame_buf, "NetPackageLockTarget", framed_body));
+}
+
+/// Inject a V3.3.0 `NetPackageLockTarget` unlock request (`isLock = false`),
+/// closing the peer's held channel so the next lock-open starts from gate 1
+/// with nothing held (stock force-unlock otherwise short-circuits it).
+fn injectLockClose(
+    g: *game_mod.Game,
+    c: *game_mod.Client,
+    frame_buf: []u8,
+    channel: u16,
+) !void {
+    var payload: [32]u8 = undefined;
+    var w: binary.Writer = .{ .buf = &payload };
+    try w.writeBool(false); // isLock = false -> unlock
+    try w.writeU16(channel);
+    try w.writeI32(0); // no targets
+    var body: [32]u8 = undefined;
+    const framed_body = try packages.frameLockTarget(&body, w.written());
+    try g.injectFramed(c, try packages.framed(frame_buf, "NetPackageLockTarget", framed_body));
+}
+
 /// Drive one zombie kill for `c`'s active clear quest at its bound POI center
 /// (0,0 when the quest has no POI), so poi_gated ClearSleepers phases count.
 fn questKillAtPoi(g: *game_mod.Game, c: *game_mod.Client) void {
@@ -3565,35 +3611,32 @@ test "scenario quest accept kill complete and trader buy" {
     // Trader lock-open: the LockResponse carries EntityTraderLockContext with
     // server TraderData; the client's trade window reads inventory from it.
     cap.clear();
-    var lr_body: [64]u8 = undefined;
-    var lw: binary.Writer = .{ .buf = &lr_body };
-    try lw.writeBool(true); // locking
+    var lr_payload: [64]u8 = undefined;
+    var lw: binary.Writer = .{ .buf = &lr_payload };
+    try lw.writeBool(true); // isLock
     try lw.writeU16(1); // channel 1 (trade)
     try lw.writeI32(1); // target count
-    try lw.writeByte(1); // present
-    try lw.writeByte(2); // Entity target
+    try lw.writeByte(3); // WorldObjectType.entity
     try lw.writeI32(te);
-    try lw.writeString("EntityTraderLockContext");
-    try lw.writeString("trade");
-    try lw.writeBool(false); // client-side hasTraderData (server fills it)
+    var lr_body: [64]u8 = undefined;
+    const lr_framed = try packages.frameLockTarget(&lr_body, lw.written());
     var lfb: [256]u8 = undefined;
-    try g.injectFramed(c, try packages.framed(&lfb, "NetPackageLockRequest", lr_body[0..lw.written().len]));
-    const lock_id = packages.idOf("NetPackageLockResponse").?;
+    try g.injectFramed(c, try packages.framed(&lfb, "NetPackageLockTarget", lr_framed));
+    const lock_id = packages.idOf("NetPackageLockTarget").?;
     const resp_body = cap.findPkgId(lock_id) orelse return error.TestUnexpectedResult;
-    var rr: binary.Reader = .{ .data = resp_body };
-    try std.testing.expectEqual(true, try rr.readBool()); // locking
+    // b18 LockTarget response: i32 payloadLen | isLock | success | error |
+    // channel | count | WorldAddress | [TraderData context on channel 1].
+    const resp_payload = try packages.unwrapLockTargetPayload(resp_body);
+    var rr: binary.Reader = .{ .data = resp_payload };
+    try std.testing.expectEqual(true, try rr.readBool()); // isLock
     try std.testing.expectEqual(true, try rr.readBool()); // success
     var scratch: [128]u8 = undefined;
     try std.testing.expectEqualStrings("", try rr.readString(&scratch)); // error
-    try std.testing.expectEqual(false, try rr.readBool()); // isForceUnlocked
     try std.testing.expectEqual(@as(u16, 1), try rr.readU16()); // channel
     try std.testing.expectEqual(@as(i32, 1), try rr.readI32()); // target count
-    try std.testing.expectEqual(@as(u8, 1), try rr.readByte()); // present
-    try std.testing.expectEqual(@as(u8, 2), try rr.readByte()); // Entity
+    try std.testing.expectEqual(@as(u8, 3), try rr.readByte()); // WorldObjectType.entity
     try std.testing.expectEqual(te, try rr.readI32());
-    try std.testing.expectEqualStrings("EntityTraderLockContext", try rr.readString(&scratch));
-    try std.testing.expectEqualStrings("trade", try rr.readString(&scratch));
-    try std.testing.expectEqual(true, try rr.readBool()); // hasTraderData
+    // EntityTrader.OnLockResponseServer writes TraderData on channel 1 (Trade).
     try std.testing.expectEqual(trader_info_id, try rr.readI32()); // traders.xml TraderID
     var open_body: [4]u8 = undefined;
     std.mem.writeInt(i32, open_body[0..4], te, .little);
@@ -3726,33 +3769,32 @@ test "scenario quest turn-in and phase advance fire on the stock trader lock-ope
     const openTrade = struct {
         fn f(gg: *game_mod.Game, cc: *game_mod.Client, target_id: i32, cap_p: *ln_peer.Capture) !void {
             cap_p.clear();
-            var lr_body: [64]u8 = undefined;
-            var lw: binary.Writer = .{ .buf = &lr_body };
-            try lw.writeBool(true); // locking
+            var lr_payload: [64]u8 = undefined;
+            var lw: binary.Writer = .{ .buf = &lr_payload };
+            try lw.writeBool(true); // isLock
             try lw.writeU16(1); // channel 1 (trade)
             try lw.writeI32(1); // target count
-            try lw.writeByte(1); // present
-            try lw.writeByte(2); // Entity target
+            try lw.writeByte(3); // WorldObjectType.entity
             try lw.writeI32(target_id);
-            try lw.writeString("EntityTraderLockContext");
-            try lw.writeString("trade");
-            try lw.writeBool(false); // client-side hasTraderData (server fills)
+            var lr_body: [64]u8 = undefined;
+            const lr_framed = try packages.frameLockTarget(&lr_body, lw.written());
             var lfb: [256]u8 = undefined;
-            try gg.injectFramed(cc, try packages.framed(&lfb, "NetPackageLockRequest", lr_body[0..lw.written().len]));
-            const lock_id = packages.idOf("NetPackageLockResponse").?;
+            try gg.injectFramed(cc, try packages.framed(&lfb, "NetPackageLockTarget", lr_framed));
+            const lock_id = packages.idOf("NetPackageLockTarget").?;
             _ = cap_p.findPkgId(lock_id) orelse return error.TestUnexpectedResult;
             // The real client closes the trade window before the next open, and
             // the close is the unlock request that clears the server entry.
             // Without it the next open hits gate 1 and is refused.
             cap_p.clear();
-            var ul_body: [32]u8 = undefined;
-            var uw: binary.Writer = .{ .buf = &ul_body };
-            try uw.writeBool(false); // unlocking
+            var ul_payload: [32]u8 = undefined;
+            var uw: binary.Writer = .{ .buf = &ul_payload };
+            try uw.writeBool(false); // isLock = false (unlock)
             try uw.writeU16(1); // same trade channel
             try uw.writeI32(0); // unlock reads no targets
-            try uw.writeString("");
+            var ul_body: [32]u8 = undefined;
+            const ul_framed = try packages.frameLockTarget(&ul_body, uw.written());
             var ufb: [128]u8 = undefined;
-            try gg.injectFramed(cc, try packages.framed(&ufb, "NetPackageLockRequest", ul_body[0..uw.written().len]));
+            try gg.injectFramed(cc, try packages.framed(&ufb, "NetPackageLockTarget", ul_framed));
             try std.testing.expectEqual(@as(i32, -1), gg.lock_channel[1]);
         }
     }.f;
@@ -3966,45 +4008,38 @@ test "scenario vending machine opens via LockRequest with TraderData" {
     // Client opens the machine: LockRequest with a TileEntity target (type 0)
     // and the VendingMachineLockContext type name. Server fills TraderData.
     cap.clear();
-    var lr_body: [128]u8 = undefined;
-    var lw: binary.Writer = .{ .buf = &lr_body };
-    try lw.writeBool(true); // locking
+    var lr_payload: [128]u8 = undefined;
+    var lw: binary.Writer = .{ .buf = &lr_payload };
+    try lw.writeBool(true); // isLock
     try lw.writeU16(0); // channel
     try lw.writeI32(1); // target count
-    try lw.writeByte(1); // present
-    try lw.writeByte(0); // TileEntity target
+    try lw.writeByte(1); // WorldObjectType.tile_entity
     try lw.writeI32(1);
     try lw.writeI32(70);
     try lw.writeI32(2);
-    try lw.writeString("VendingMachineLockContext");
+    var lr_body: [128]u8 = undefined;
+    const lr_framed = try packages.frameLockTarget(&lr_body, lw.written());
     var lfb: [256]u8 = undefined;
-    try g.injectFramed(c, try packages.framed(&lfb, "NetPackageLockRequest", lr_body[0..lw.written().len]));
+    try g.injectFramed(c, try packages.framed(&lfb, "NetPackageLockTarget", lr_framed));
 
-    // LockResponse: locking+success, echoes the vending context type, and
-    // carries server TraderData (trader id 3).
-    const lock_id = packages.idOf("NetPackageLockResponse").?;
+    // LockTarget response: isLock+success, echoes the tile_entity target, and
+    // carries server TraderData (trader id 3) in the per-target context.
+    const lock_id = packages.idOf("NetPackageLockTarget").?;
     const resp_body = cap.findPkgId(lock_id) orelse return error.TestUnexpectedResult;
-    var rr: binary.Reader = .{ .data = resp_body };
-    try std.testing.expectEqual(true, try rr.readBool()); // locking
+    const resp_payload = try packages.unwrapLockTargetPayload(resp_body);
+    var rr: binary.Reader = .{ .data = resp_payload };
+    try std.testing.expectEqual(true, try rr.readBool()); // isLock
     try std.testing.expectEqual(true, try rr.readBool()); // success
     var scratch: [128]u8 = undefined;
     try std.testing.expectEqualStrings("", try rr.readString(&scratch)); // error
-    try std.testing.expectEqual(false, try rr.readBool()); // isForceUnlocked
     try std.testing.expectEqual(@as(u16, 0), try rr.readU16()); // channel
     try std.testing.expectEqual(@as(i32, 1), try rr.readI32()); // target count
-    try std.testing.expectEqual(@as(u8, 1), try rr.readByte()); // present
-    try std.testing.expectEqual(@as(u8, 0), try rr.readByte()); // TileEntity
+    try std.testing.expectEqual(@as(u8, 1), try rr.readByte()); // WorldObjectType.tile_entity
     try std.testing.expectEqual(@as(i32, 1), try rr.readI32());
     try std.testing.expectEqual(@as(i32, 70), try rr.readI32());
     try std.testing.expectEqual(@as(i32, 2), try rr.readI32());
-    // Context type name preserved from the request.
-    try std.testing.expectEqualStrings("VendingMachineLockContext", try rr.readString(&scratch));
-    // VendingMachineLockContext::Read takes TraderData straight after the type
-    // name: no Command string, no hasTraderData bool (those belong to
-    // EntityTraderLockContext). This test used to assert both of them, which
-    // is what kept the wrong shape in place: a stock client would have read
-    // the empty command's length byte and the bool as the first two bytes of
-    // TraderID.
+    // Per-target context (TileEntityVendingMachine.OnLockResponseServer) is
+    // TraderData straight after the target, with no type-name/Command/bool.
     try std.testing.expectEqual(@as(i32, 3), try rr.readI32()); // trader id
     _ = try rr.readU64(); // lastInventoryUpdate
     try std.testing.expectEqual(@as(u8, 2), try rr.readByte()); // TraderData FileVersion
@@ -4082,21 +4117,20 @@ test "scenario trader close cycle force-unlocks the trade channel" {
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
 
-    // Open the trade window the way the stock client does: LockRequest on
-    // channel 0 with an Entity target (EntityTraderLockContext).
+    // Open the trade window the way the stock client does: LockTarget on
+    // channel 0 with an Entity target (WorldAddress type 3).
     cap.clear();
-    var lr_body: [128]u8 = undefined;
-    var lw: binary.Writer = .{ .buf = &lr_body };
-    try lw.writeBool(true); // locking
-    try lw.writeU16(0); // trade channel
+    var lr_payload: [128]u8 = undefined;
+    var lw: binary.Writer = .{ .buf = &lr_payload };
+    try lw.writeBool(true); // isLock
+    try lw.writeU16(0); // Interaction channel
     try lw.writeI32(1);
-    try lw.writeByte(1); // present
-    try lw.writeByte(2); // Entity target
+    try lw.writeByte(3); // WorldObjectType.entity
     try lw.writeI32(trader_id);
-    try lw.writeString("EntityTraderLockContext");
-    try lw.writeString("trade");
+    var lr_body: [128]u8 = undefined;
+    const lr_framed = try packages.frameLockTarget(&lr_body, lw.written());
     var lfb: [256]u8 = undefined;
-    try g.injectFramed(c, try packages.framed(&lfb, "NetPackageLockRequest", lr_body[0..lw.written().len]));
+    try g.injectFramed(c, try packages.framed(&lfb, "NetPackageLockTarget", lr_framed));
     try std.testing.expect(g.lock_channel[0] == @as(i32, @intCast(c.slot)));
     try std.testing.expect(!g.sim.trader_stock[ts].is_closed);
 
@@ -4107,11 +4141,12 @@ test "scenario trader close cycle force-unlocks the trade channel" {
     try g.step();
     try std.testing.expect(g.sim.trader_stock[ts].is_closed);
     try std.testing.expect(g.lock_channel[0] < 0);
-    const lock_id = packages.idOf("NetPackageLockResponse").?;
+    const lock_id = packages.idOf("NetPackageLockTarget").?;
     const resp = cap.findPkgId(lock_id) orelse return error.TestUnexpectedResult;
-    // Forced unlock: locking=false, success=true (buildLockResponseUnlock).
-    var rr: binary.Reader = .{ .data = resp };
-    try std.testing.expectEqual(false, try rr.readBool()); // locking
+    // Forced unlock: isLock=false, success=true (buildLockResponseForceUnlock).
+    const resp_payload = try packages.unwrapLockTargetPayload(resp);
+    var rr: binary.Reader = .{ .data = resp_payload };
+    try std.testing.expectEqual(false, try rr.readBool()); // isLock
     try std.testing.expectEqual(true, try rr.readBool()); // success
 
     // Gate 4 (IL=239): EntityTrader::CanLockOnServer (IL=16) refuses a closed
@@ -4119,22 +4154,22 @@ test "scenario trader close cycle force-unlocks the trade channel" {
     // table first and then told the client the open failed, so a refused open
     // pinned the channel server-side against every other player.
     cap.clear();
-    var lr2: [128]u8 = undefined;
-    var lw2: binary.Writer = .{ .buf = &lr2 };
-    try lw2.writeBool(true); // locking
+    var lr2_payload: [128]u8 = undefined;
+    var lw2: binary.Writer = .{ .buf = &lr2_payload };
+    try lw2.writeBool(true); // isLock
     try lw2.writeU16(0);
     try lw2.writeI32(1);
-    try lw2.writeByte(1); // present
-    try lw2.writeByte(2); // Entity target
+    try lw2.writeByte(3); // WorldObjectType.entity
     try lw2.writeI32(trader_id);
-    try lw2.writeString("EntityTraderLockContext");
-    try lw2.writeString("trade");
-    try g.injectFramed(c, try packages.framed(&lfb, "NetPackageLockRequest", lr2[0..lw2.written().len]));
+    var lr2: [128]u8 = undefined;
+    const lr2_framed = try packages.frameLockTarget(&lr2, lw2.written());
+    try g.injectFramed(c, try packages.framed(&lfb, "NetPackageLockTarget", lr2_framed));
     try std.testing.expectEqual(@as(i32, -1), g.lock_channel[0]);
     {
         const denied = cap.findPkgId(lock_id) orelse return error.TestUnexpectedResult;
-        var dr: binary.Reader = .{ .data = denied };
-        try std.testing.expectEqual(true, try dr.readBool()); // locking
+        const denied_payload = try packages.unwrapLockTargetPayload(denied);
+        var dr: binary.Reader = .{ .data = denied_payload };
+        try std.testing.expectEqual(true, try dr.readBool()); // isLock
         try std.testing.expectEqual(false, try dr.readBool()); // success = deny
     }
 
@@ -5069,9 +5104,13 @@ test "scenario inventory move drop place equip" {
     // Seed ECS inventory via give for the rest of this scenario (stock clients push C2S inv).
     _ = inv_id;
 
-    // Give wood + armor via admin path
+    // Give wood + armor via admin path. Wood uses the resourceWood id so the
+    // ItemDrop stack's stock type reverses back to it (the drop handler matches
+    // by reversed type, not by slot index).
     const inv = @import("../ecs/inventory.zig");
-    try std.testing.expect(inv.give(&g.sim, c.slot, 7, 10));
+    const wood_id: u16 = g.items.ecsIdByName("resourceWood");
+    try std.testing.expect(wood_id != 0);
+    try std.testing.expect(inv.give(&g.sim, c.slot, wood_id, 10));
     try std.testing.expect(inv.give(&g.sim, c.slot, 11, 1));
 
     // Wire: move holding, drop, place
@@ -5084,12 +5123,57 @@ test "scenario inventory move drop place equip" {
     const drop_wood_slot: u16 = blk: {
         const ps = g.sim.playerByPeer(c.slot).?;
         for (g.sim.inventory[ps].slots, 0..) |s, i| {
-            if (s.item_id == 7 and s.count > 0) break :blk @intCast(i);
+            if (s.item_id == wood_id and s.count > 0) break :blk @intCast(i);
         }
         break :blk 1;
     };
-    const drop_req = try packages.buildInvTxRequest(&txb, @intFromEnum(inv.Op.drop), drop_wood_slot, 0, 1, -1);
-    try g.injectFramed(c, try packages.framed(&fb, "NetPackageInventoryTransactionRequest", drop_req));
+    // b18: a drop rides NetPackageItemDrop (the handler consumes a matching
+    // stack and spawns the entity). Snapshot the wood total first so the assert
+    // is relative (the join starter kit may already carry wood).
+    const wood_before = blk: {
+        const ps = g.sim.playerByPeer(c.slot).?;
+        var t: u32 = 0;
+        for (g.sim.inventory[ps].slots) |sl| {
+            if (sl.item_id == wood_id) t += sl.count;
+        }
+        break :blk t;
+    };
+    {
+        const ps = g.sim.playerByPeer(c.slot).?;
+        const sl = g.sim.inventory[ps].slots[drop_wood_slot];
+        const dstack = packages.stock_inv.StockSlot{
+            .type_id = packages.stock_inv.typeFromBuiltinId(7),
+            .count = 1,
+        };
+        _ = sl;
+        var db: [256]u8 = undefined;
+        var dw: binary.Writer = .{ .buf = &db };
+        try packages.stock_inv.writeItemStack(&dw, dstack);
+        try dw.writeF32(260); // x
+        try dw.writeF32(70); // y
+        try dw.writeF32(260); // z
+        try dw.writeF32(0);
+        try dw.writeF32(0);
+        try dw.writeF32(0); // initialMotion
+        try dw.writeF32(0);
+        try dw.writeF32(0);
+        try dw.writeF32(0); // randomPosAdd
+        try dw.writeF32(60); // lifetime
+        try dw.writeI32(-1); // entityId
+        try dw.writeI32(1); // clientInstanceId
+        try dw.writeBool(false);
+        cap.clear();
+        try g.injectFramed(c, try packages.framed(&fb, "NetPackageItemDrop", dw.written()));
+    }
+    // The drop consumed one wood.
+    {
+        const ps = g.sim.playerByPeer(c.slot).?;
+        var total: u32 = 0;
+        for (g.sim.inventory[ps].slots) |sl| {
+            if (sl.item_id == wood_id) total += sl.count;
+        }
+        try std.testing.expectEqual(wood_before - 1, total);
+    }
     // place wood at 10,70,10
     const wood_slot: u16 = blk: {
         const ps = g.sim.playerByPeer(c.slot).?;
@@ -5104,16 +5188,9 @@ test "scenario inventory move drop place equip" {
     // Body is (op, a=slot, b=y, qty=z, entityId=x), so the cell is
     // (250, 80, 250): interior x/z (the world-edge band is refused like
     // stock's `InBoundsForPlayersPercent`) and above the flat ground.
-    const place_req = try packages.buildInvTxRequest(
-        &txb,
-        @intFromEnum(inv.Op.place),
-        wood_slot,
-        @bitCast(@as(i16, 80)),
-        @bitCast(@as(i16, 250)),
-        250,
-    );
-    try g.injectFramed(c, try packages.framed(&fb, "NetPackageInventoryTransactionRequest", place_req));
-    // resourceWood places frameShapes:cube (AssignIds), not bedrock(4).
+    _ = wood_slot; // the block no longer consumes a slot on this path
+    // b18: a place rides NetPackageSetBlock (the authoritative world edit).
+    try g.injectFramed(c, try packages.framed(&fb, "NetPackageSetBlock", try packages.stock_block.buildSetBlockBody(&txb, 250, 80, 250, inv.place_wood_block_id)));
     try std.testing.expectEqual(inv.place_wood_block_id, try g.world.blockWorld(250, 80, 250));
 
     // equip armor
@@ -5124,12 +5201,31 @@ test "scenario inventory move drop place equip" {
         }
         break :blk 0;
     };
-    const eq = try packages.buildInvTxRequest(&txb, @intFromEnum(inv.Op.equip), armor_slot, 0, 0, -1);
-    try g.injectFramed(c, try packages.framed(&fb, "NetPackageInventoryTransactionRequest", eq));
+    _ = armor_slot;
+    // b18: equip rides the PlayerInventory blob push (armor to an equip slot).
+    {
+        const ps = g.sim.playerByPeer(c.slot).?;
+        var copy = g.sim.inventory[ps];
+        // Move the armor (item 11) from wherever give() placed it into the
+        // first equip slot, then push the resulting body.
+        var armor_at: ?usize = null;
+        for (copy.slots, 0..) |sl, i| {
+            if (sl.item_id == 11 and sl.count > 0) {
+                armor_at = i;
+                break;
+            }
+        }
+        if (armor_at) |ai| {
+            copy.slots[quest_mod_components.inv_equip_start] = copy.slots[ai];
+            copy.slots[ai] = .{};
+        }
+        var body: [8192]u8 = undefined;
+        const blob = try packages.buildInventoryBodyStock(&body, &copy);
+        var efb: [9000]u8 = undefined;
+        cap.clear();
+        try g.injectFramed(c, try packages.framed(&efb, "NetPackagePlayerInventory", blob));
+    }
     try std.testing.expect(inv.armorMitigation(&g.sim, c.slot) >= 0.09);
-
-    const rid = packages.idOf("NetPackageInventoryTransactionResponse").?;
-    try std.testing.expect(cap.findPkgId(rid) != null);
 
     // Stock C→S: client-style PlayerInventory body applied into ECS.
     {
@@ -5403,13 +5499,9 @@ test "scenario craft invtx + explosion dig + lock deny" {
     // by using wood→wood (consume 1 wood, get 1 wood) as smoke that path runs without error.
     const ps = g.sim.playerByPeer(ca.slot).?;
     try std.testing.expect(g.sim.inventory[ps].addItem(7, 5)); // wood
-    {
-        var txb: [32]u8 = undefined;
-        const tb = try packages.buildInvTxRequest(&txb, @intFromEnum(@import("../ecs/inventory.zig").Op.craft), 0, 0, 1, 0);
-        var fb: [64]u8 = undefined;
-        try g.injectFramed(ca, try packages.framed(&fb, "NetPackageInventoryTransactionRequest", tb));
-    }
-    // After craft (resourceWood consumes wood, grants wood): still have wood.
+    // b18 removed the per-operation craft transaction; backpack crafting runs
+    // client-side and the result arrives on the inventory blob push. The wood
+    // is still held, which is what this smoke check asserts.
     try std.testing.expect(g.sim.inventory[ps].countItem(7) >= 1);
 
     // Place a stone block then explode it away.
@@ -5452,16 +5544,22 @@ test "scenario craft invtx + explosion dig + lock deny" {
     try std.testing.expect(exp_id != null or sb_id != null);
     if (exp_id) |eid| try std.testing.expect(cap_b.findPkgId(eid) != null or (sb_id != null and cap_b.findPkgId(sb_id.?) != null));
 
-    // Lock: A holds channel 0; B denied.
+    // Lock: A holds channel 0; B denied. b18 needs at least one target
+    // (LockRequestServer accepts 1..5), so send a tile_entity target.
     {
-        var req: [64]u8 = undefined;
-        var w: @import("../wire/binary.zig").Writer = .{ .buf = &req };
-        try w.writeBool(true);
+        var payload: [64]u8 = undefined;
+        var w: @import("../wire/binary.zig").Writer = .{ .buf = &payload };
+        try w.writeBool(true); // isLock
         try w.writeU16(0);
-        try w.writeI32(0); // no targets
-        try w.writeString("");
+        try w.writeI32(1); // one target
+        try w.writeByte(1); // WorldObjectType.tile_entity
+        try w.writeI32(252);
+        try w.writeI32(70);
+        try w.writeI32(252);
+        var req: [64]u8 = undefined;
+        const req_framed = try packages.frameLockTarget(&req, w.written());
         var fb: [128]u8 = undefined;
-        const framed = try packages.framed(&fb, "NetPackageLockRequest", w.written());
+        const framed = try packages.framed(&fb, "NetPackageLockTarget", req_framed);
         try g.injectFramed(ca, framed);
         try g.injectFramed(cb, framed);
         try std.testing.expectEqual(@as(i32, @intCast(ca.slot)), g.lock_channel[0]);
@@ -5493,51 +5591,54 @@ test "scenario a locked tile entity stays locked on a different channel" {
     // Lock request naming one block target (type 0 = block: x, y, z).
     const buildReq = struct {
         fn call(buf: []u8, channel: u16, x: i32, y: i32, z: i32) ![]u8 {
-            var w: binary.Writer = .{ .buf = buf };
-            try w.writeBool(true); // locking
+            // b18 LockTarget request payload: isLock | channel | count | tag+fields,
+            // framed into the package body (i32 payloadLen | payload).
+            var payload: [64]u8 = undefined;
+            var w: binary.Writer = .{ .buf = &payload };
+            try w.writeBool(true); // isLock
             try w.writeU16(channel);
             try w.writeI32(1); // one target
-            try w.writeByte(1); // present
-            try w.writeByte(0); // block target
+            try w.writeByte(1); // WorldObjectType.tile_entity (block pos)
             try w.writeI32(x);
             try w.writeI32(y);
             try w.writeI32(z);
-            try w.writeString(""); // context
-            return w.written();
+            return packages.frameLockTarget(buf, w.written());
         }
     }.call;
 
-    const lock_id = packages.idOf("NetPackageLockResponse") orelse return error.TestUnexpectedResult;
+    const lock_id = packages.idOf("NetPackageLockTarget") orelse return error.TestUnexpectedResult;
     var rb: [64]u8 = undefined;
     var fb: [256]u8 = undefined;
 
     // A takes the chest on channel 0.
     cap_a.clear();
-    try g.injectFramed(ca, try packages.framed(&fb, "NetPackageLockRequest", try buildReq(&rb, 0, 300, 70, 300)));
+    try g.injectFramed(ca, try packages.framed(&fb, "NetPackageLockTarget", try buildReq(&rb, 0, 300, 70, 300)));
     try std.testing.expectEqual(@as(i32, @intCast(ca.slot)), g.lock_channel[0]);
     {
         const body = cap_a.findPkgId(lock_id) orelse return error.TestUnexpectedResult;
-        var r: binary.Reader = .{ .data = body };
-        _ = try r.readBool(); // locking
+        const body_p = try packages.unwrapLockTargetPayload(body);
+        var r: binary.Reader = .{ .data = body_p };
+        _ = try r.readBool(); // isLock
         try std.testing.expectEqual(true, try r.readBool()); // success
     }
 
     // B asks for the same chest on channel 1: a free channel, someone else's
     // chest. The response must be a denial and the channel must stay unheld.
     cap_b.clear();
-    try g.injectFramed(cb, try packages.framed(&fb, "NetPackageLockRequest", try buildReq(&rb, 1, 300, 70, 300)));
+    try g.injectFramed(cb, try packages.framed(&fb, "NetPackageLockTarget", try buildReq(&rb, 1, 300, 70, 300)));
     try std.testing.expectEqual(@as(i32, -1), g.lock_channel[1]);
     {
         const body = cap_b.findPkgId(lock_id) orelse return error.TestUnexpectedResult;
-        var r: binary.Reader = .{ .data = body };
-        _ = try r.readBool(); // locking
+        const body_p = try packages.unwrapLockTargetPayload(body);
+        var r: binary.Reader = .{ .data = body_p };
+        _ = try r.readBool(); // isLock
         try std.testing.expectEqual(false, try r.readBool()); // success
     }
 
     // A different chest on that same channel 1 is fine, so the denial above is
     // the position sweep and not the channel being unusable.
     cap_b.clear();
-    try g.injectFramed(cb, try packages.framed(&fb, "NetPackageLockRequest", try buildReq(&rb, 1, 320, 70, 320)));
+    try g.injectFramed(cb, try packages.framed(&fb, "NetPackageLockTarget", try buildReq(&rb, 1, 320, 70, 320)));
     try std.testing.expectEqual(@as(i32, @intCast(cb.slot)), g.lock_channel[1]);
 
     // B, already holding channel 1, opens a third chest on channel 2. Stock's
@@ -5548,7 +5649,7 @@ test "scenario a locked tile entity stays locked on a different channel" {
     // the new channel and left a channel per chest behind, pinned against every
     // other player until the stale timeout.
     cap_b.clear();
-    try g.injectFramed(cb, try packages.framed(&fb, "NetPackageLockRequest", try buildReq(&rb, 2, 340, 70, 340)));
+    try g.injectFramed(cb, try packages.framed(&fb, "NetPackageLockTarget", try buildReq(&rb, 2, 340, 70, 340)));
     try std.testing.expectEqual(@as(i32, -1), g.lock_channel[2]); // refused
     try std.testing.expectEqual(@as(i32, -1), g.lock_channel[1]); // released by gate 1
     // B's client is told the old one released, or its UI keeps the first chest
@@ -5563,15 +5664,16 @@ test "scenario a locked tile entity stays locked on a different channel" {
             var j: usize = 0;
             while (j < pn) : (j += 1) {
                 if (pkgs[j].id != lock_id) continue;
-                var r: binary.Reader = .{ .data = pkgs[j].body };
+                const body_p = try packages.unwrapLockTargetPayload(pkgs[j].body);
+                var r: binary.Reader = .{ .data = body_p };
                 const locking = try r.readBool();
                 // Gate 1 has only the unlock reply to send, never a grant.
                 try std.testing.expectEqual(false, locking);
                 try std.testing.expectEqual(true, try r.readBool()); // success
                 var s: [8]u8 = undefined;
-                _ = try r.readString(&s);
-                try std.testing.expectEqual(true, try r.readBool()); // isForceUnlocked
+                _ = try r.readString(&s); // error
                 try std.testing.expectEqual(@as(u16, 1), try r.readU16()); // the OLD channel
+                try std.testing.expectEqual(@as(i32, 0), try r.readI32()); // no targets
                 found_unlock = true;
                 break;
             }
@@ -5582,7 +5684,7 @@ test "scenario a locked tile entity stays locked on a different channel" {
     // B is clean again, so a fresh open is granted normally: gate 1 refuses
     // only the request that arrives while an entry is still held.
     cap_b.clear();
-    try g.injectFramed(cb, try packages.framed(&fb, "NetPackageLockRequest", try buildReq(&rb, 2, 340, 70, 340)));
+    try g.injectFramed(cb, try packages.framed(&fb, "NetPackageLockTarget", try buildReq(&rb, 2, 340, 70, 340)));
     try std.testing.expectEqual(@as(i32, @intCast(cb.slot)), g.lock_channel[2]);
 
     // A disconnects while still holding channel 0. Clearing the slot lets the
@@ -5596,15 +5698,16 @@ test "scenario a locked tile entity stays locked on a different channel" {
     try std.testing.expectEqual(@as(i32, -1), g.lock_channel[0]);
     const unlock = cap_b.findPkgId(lock_id) orelse return error.NoForceUnlockOnDisconnect;
     {
-        var r: binary.Reader = .{ .data = unlock };
-        // locking=false is what routes the client to UnlockResponse; a
-        // grant-shaped body would re-open the window instead of closing it.
+        const unlock_p = try packages.unwrapLockTargetPayload(unlock);
+        var r: binary.Reader = .{ .data = unlock_p };
+        // isLock=false routes the client to UnlockResponse; a grant-shaped
+        // body would re-open the window instead of closing it.
         try std.testing.expectEqual(false, try r.readBool());
         try std.testing.expectEqual(true, try r.readBool()); // success
         var s: [8]u8 = undefined;
         _ = try r.readString(&s); // errorMsg
-        try std.testing.expectEqual(true, try r.readBool()); // isForceUnlocked
         try std.testing.expectEqual(@as(u16, 0), try r.readU16()); // channel 0
+        try std.testing.expectEqual(@as(i32, 0), try r.readI32()); // no targets
     }
 
     // A failed inventory transaction also force-unlocks. Stock's
@@ -5615,71 +5718,67 @@ test "scenario a locked tile entity stays locked on a different channel" {
     // channel against everyone else. B still holds channel 2 from above.
     try std.testing.expectEqual(@as(i32, @intCast(cb.slot)), g.lock_channel[2]);
     cap_b.clear();
+    // b18 removed the transaction package that used to force-unlock on a
+    // refused operation. B releases channel 2 with an explicit unlock, the way
+    // the client closes the window, so the gate-2 section starts with nothing
+    // held.
     {
-        // One entry, one SetAbsolute op at an out-of-range index: the handler
-        // stages, fails, and commits nothing.
-        var tx: [128]u8 = undefined;
-        var tw: binary.Writer = .{ .buf = &tx };
-        try tw.writeI32(1); // entry count
-        for (0..16) |_| try tw.writeByte(0); // guid
-        try tw.writeI32(0); // initial hash
-        try tw.writeI32(0); // final hash
-        try tw.writeI32(1); // op count
-        try tw.writeI16(0); // SetAbsolute
-        try tw.writeU16(0); // empty ItemStack (count 0, no ItemValue)
-        try tw.writeI32(9999); // index past max_inv_slots
-        var txf: [256]u8 = undefined;
-        try g.injectFramed(cb, try packages.framed(&txf, "NetPackageInventoryTransactionRequest", tw.written()));
+        var ub: [32]u8 = undefined;
+        var uw: binary.Writer = .{ .buf = &ub };
+        try uw.writeBool(false); // isLock = false -> unlock
+        try uw.writeU16(2);
+        try uw.writeI32(0);
+        var uframed: [64]u8 = undefined;
+        const ufb = try packages.frameLockTarget(&uframed, uw.written());
+        var ub_frame: [256]u8 = undefined;
+        try g.injectFramed(cb, try packages.framed(&ub_frame, "NetPackageLockTarget", ufb));
     }
     try std.testing.expectEqual(@as(i32, -1), g.lock_channel[2]);
 
-    // Gate 2 (IL=239): six targets is past stock's hard cap of 5, and a span
-    // carrying a null target is refused too. Stock still replies with a
-    // NetPackageLockResponse carrying success=false (IL_0263); dropping the
-    // body left the client's pending lock unresolved. B holds nothing here, so
-    // gate 1 cannot be what produces the deny.
+    // Gate 2 (`LockRequestServer` IL_000E-0014): six targets is past stock's
+    // cap of 5, and b18 logs and **drops** with no reply (protocol-packages.md
+    // §1.5.1). A span carrying a null target is refused with a deny (IL_00BE).
+    // B holds nothing here, so gate 1 cannot be what produces the deny.
     cap_b.clear();
     {
         var big: [256]u8 = undefined;
         var bw: binary.Writer = .{ .buf = &big };
-        try bw.writeBool(true); // locking
+        try bw.writeBool(true); // isLock
         try bw.writeU16(3);
         try bw.writeI32(6);
         var i: i32 = 0;
         while (i < 6) : (i += 1) {
-            try bw.writeByte(1); // present
-            try bw.writeByte(0); // block target
+            try bw.writeByte(1); // WorldObjectType.tile_entity
             try bw.writeI32(400 + i);
             try bw.writeI32(70);
             try bw.writeI32(400);
         }
-        try bw.writeString("");
-        try g.injectFramed(cb, try packages.framed(&fb, "NetPackageLockRequest", bw.written()));
+        var bp: [256]u8 = undefined;
+        const bframed = try packages.frameLockTarget(&bp, bw.written());
+        try g.injectFramed(cb, try packages.framed(&fb, "NetPackageLockTarget", bframed));
     }
     try std.testing.expectEqual(@as(i32, -1), g.lock_channel[3]);
-    {
-        const body = cap_b.findPkgId(lock_id) orelse return error.TestUnexpectedResult;
-        var r: binary.Reader = .{ .data = body };
-        try std.testing.expectEqual(true, try r.readBool()); // locking
-        try std.testing.expectEqual(false, try r.readBool()); // success = deny
-    }
+    // Over-limit is dropped: no LockTarget reply reaches B.
+    try std.testing.expect(cap_b.findPkgId(lock_id) == null);
 
-    // A null target is gate 2's other reject and takes the same deny path.
+    // A null target is gate 2's other reject and takes the deny path.
     cap_b.clear();
     {
         var nb: [64]u8 = undefined;
         var nw: binary.Writer = .{ .buf = &nb };
-        try nw.writeBool(true);
+        try nw.writeBool(true); // isLock
         try nw.writeU16(3);
         try nw.writeI32(1);
-        try nw.writeByte(0); // present = 0 -> null target
-        try nw.writeString("");
-        try g.injectFramed(cb, try packages.framed(&fb, "NetPackageLockRequest", nw.written()));
+        try nw.writeByte(0); // WorldObjectType.none -> null target
+        var np: [64]u8 = undefined;
+        const nframed = try packages.frameLockTarget(&np, nw.written());
+        try g.injectFramed(cb, try packages.framed(&fb, "NetPackageLockTarget", nframed));
     }
     try std.testing.expectEqual(@as(i32, -1), g.lock_channel[3]);
     {
         const body = cap_b.findPkgId(lock_id) orelse return error.TestUnexpectedResult;
-        var r: binary.Reader = .{ .data = body };
+        const body_p = try packages.unwrapLockTargetPayload(body);
+        var r: binary.Reader = .{ .data = body_p };
         try std.testing.expectEqual(true, try r.readBool());
         try std.testing.expectEqual(false, try r.readBool());
     }
@@ -5711,17 +5810,19 @@ test "scenario inventory keep-open refreshes the lock stale window" {
 
     const lockOne = struct {
         fn call(gg: *game_mod.Game, cc: *game_mod.Client, rb: []u8, fb: []u8) !void {
+            // rb holds the payload; framed_body is the framed package body;
+            // fb is the transport frame.
             var w: binary.Writer = .{ .buf = rb };
-            try w.writeBool(true); // locking
+            try w.writeBool(true); // isLock
             try w.writeU16(0);
             try w.writeI32(1);
-            try w.writeByte(1); // present
-            try w.writeByte(0); // block target
+            try w.writeByte(1); // WorldObjectType.tile_entity
             try w.writeI32(300);
             try w.writeI32(70);
             try w.writeI32(300);
-            try w.writeString("");
-            try gg.injectFramed(cc, try packages.framed(fb, "NetPackageLockRequest", w.written()));
+            var framed_body_buf: [64]u8 = undefined;
+            const framed_body = try packages.frameLockTarget(&framed_body_buf, w.written());
+            try gg.injectFramed(cc, try packages.framed(fb, "NetPackageLockTarget", framed_body));
         }
     }.call;
 
@@ -5879,126 +5980,6 @@ test "scenario NetPackageBag naming another player is refused" {
     try std.testing.expectEqual(before_n, g.sim.inventory[psb].slots[10].count);
     try std.testing.expectEqual(own_before + 1, g.harness.counters.get(.ownership_rejects));
     std.debug.print("PASS bag-ownership: own bag applied, another player's refused\n", .{});
-}
-
-test "scenario gas can refuel generator via InvTx place" {
-    io_fs.mkdirPath("worlds");
-    freshScenarioDir("worlds/zdtd_sc_refuel");
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
-    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_refuel", 0);
-    defer g.destroy();
-    var cap: ln_peer.Capture = .{};
-    const c = try g.attachJoinedClient(&cap);
-
-    // Place a generator node with empty tank at a known world pos near spawn.
-    const gx: i32 = 260;
-    const gy: i32 = 70;
-    const gz: i32 = 260;
-    const gen = g.sim.power.addNodeAt(.generator, gx, gy, gz, 100).?;
-    const gi = g.sim.power.indexOfId(gen).?;
-    g.sim.power.nodes[gi].capacity = 1000;
-    g.sim.power.nodes[gi].fuel_or_energy = 0;
-    g.sim.power.nodes[gi].on = false;
-    g.sim.power.nodes[gi].burn_rate = 1;
-    g.sim.power.resolve();
-
-    // Register a fuel item with FuelValue (stock ammoGasCan shape) without full items.xml.
-    // Inject into ItemTable defs via a temporary override on fuel_value_fn.
-    const fuel_id: u16 = 50;
-    const FuelCtx = struct {
-        fn fuel(_: ?*anyopaque, id: u16) f32 {
-            return if (id == 50) 25 else 0;
-        }
-    };
-    g.sim.fuel_value_ctx = null;
-    g.sim.fuel_value_fn = &FuelCtx.fuel;
-
-    const inv = @import("../ecs/inventory.zig");
-    const ps0 = g.sim.playerByPeer(c.slot).?;
-    // Starter kit may already hold item_id 50; isolate the fuel stack.
-    g.sim.inventory[ps0].clear();
-    try std.testing.expect(inv.give(&g.sim, c.slot, fuel_id, 3));
-    const fuel_slot: u16 = blk: {
-        for (g.sim.inventory[ps0].slots, 0..) |s, i| {
-            if (s.item_id == fuel_id and s.count > 0) break :blk @intCast(i);
-        }
-        break :blk 0;
-    };
-    try std.testing.expectEqual(@as(u16, 3), g.sim.inventory[ps0].slots[fuel_slot].count);
-
-    // Move player near generator for range check.
-    if (g.sim.slotOfNetId(c.entity_id)) |ps| {
-        g.sim.transform[ps].x = @floatFromInt(gx);
-        g.sim.transform[ps].y = @floatFromInt(gy);
-        g.sim.transform[ps].z = @floatFromInt(gz);
-    }
-
-    var txb: [32]u8 = undefined;
-    // InvTx place: a=slot, b=y, qty=z, entity_id=x
-    const place_req = try packages.buildInvTxRequest(
-        &txb,
-        @intFromEnum(inv.Op.place),
-        fuel_slot,
-        @bitCast(@as(i16, @intCast(gy))),
-        @bitCast(@as(i16, @intCast(gz))),
-        gx,
-    );
-    var fb: [128]u8 = undefined;
-    try g.injectFramed(c, try packages.framed(&fb, "NetPackageInventoryTransactionRequest", place_req));
-
-    try std.testing.expect(g.sim.power.nodes[gi].fuel_or_energy >= 25);
-    try std.testing.expect(g.sim.power.nodes[gi].on);
-    const ps = g.sim.playerByPeer(c.slot).?;
-    var remaining: u32 = 0;
-    for (g.sim.inventory[ps].slots) |s| {
-        if (s.item_id == fuel_id) remaining += s.count;
-    }
-    try std.testing.expectEqual(@as(u32, 2), remaining);
-
-    std.debug.print(
-        "PASS refuel: gen_fuel={d:.0} remaining_cans={d}\n",
-        .{ g.sim.power.nodes[gi].fuel_or_energy, remaining },
-    );
-}
-
-test "scenario ItemActionEat via InvTx use applies food and hp" {
-    io_fs.mkdirPath("worlds");
-    freshScenarioDir("worlds/zdtd_sc_eat");
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
-    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_eat", 0);
-    defer g.destroy();
-    var cap: ln_peer.Capture = .{};
-    const c = try g.attachJoinedClient(&cap);
-    const inv = @import("../ecs/inventory.zig");
-
-    const ps = g.sim.playerByPeer(c.slot).?;
-    g.sim.health[ps].hp = 50;
-    g.sim.health[ps].food = 40;
-    g.sim.health[ps].food_max = 100;
-    // Clear starter kit; give one food (ecs id 2 = foodCanBeef).
-    g.sim.inventory[ps] = .{};
-    try std.testing.expect(inv.give(&g.sim, c.slot, 2, 1));
-    const food_slot: u16 = blk: {
-        for (g.sim.inventory[ps].slots, 0..) |s, i| {
-            if (s.item_id == 2 and s.count > 0) break :blk @intCast(i);
-        }
-        return error.TestUnexpectedResult;
-    };
-    var txb: [32]u8 = undefined;
-    const use_req = try packages.buildInvTxRequest(&txb, @intFromEnum(inv.Op.use), food_slot, 0, 0, -1);
-    var fb: [128]u8 = undefined;
-    try g.injectFramed(c, try packages.framed(&fb, "NetPackageInventoryTransactionRequest", use_req));
-    try std.testing.expectEqual(@as(u16, 0), g.sim.inventory[ps].slots[food_slot].count);
-    try std.testing.expect(g.sim.health[ps].food >= 54.9);
-    try std.testing.expect(g.sim.health[ps].hp >= 56.9);
-    // S2C EntityStatChanged food/health should have been sent.
-    const st_id = packages.idOf("NetPackageEntityStatChanged").?;
-    try std.testing.expect(cap.findPkgId(st_id) != null);
-    std.debug.print("PASS ItemActionEat: food={d:.0} hp={d:.0}\n", .{ g.sim.health[ps].food, g.sim.health[ps].hp });
 }
 
 test "scenario ItemActionEat via PlayerInventory stack-loss applies food and hp" {
@@ -6262,125 +6243,6 @@ test "scenario guardreport shows the would-kick diff (T23)" {
     try std.testing.expect(std.mem.find(u8, reply, "tripped=true") != null);
     try std.testing.expect(std.mem.find(u8, reply, "det=movement") != null);
     std.debug.print("PASS guardreport: {s}\n", .{reply});
-}
-
-test "scenario stock InvTx rejects unresolvable item stacks (T18)" {
-    // T18 hardening: a stock InventoryTransaction SetAbsolute carrying a
-    // non-empty stack that does not resolve to a server catalog item must be
-    // REJECTED (fail-closed, honest success bit + c2s_rejects), not silently
-    // applied as an empty slot with a success ack.
-    io_fs.mkdirPath("worlds");
-    freshScenarioDir("worlds/zdtd_sc_stocktx");
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
-    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_stocktx", 0);
-    defer g.destroy();
-    var cap: ln_peer.Capture = .{};
-    const c = try g.attachJoinedClient(&cap);
-    const ps = g.sim.playerByPeer(c.slot).?;
-
-    // Seed a known item at slot 3 so we can assert it survives a rejected tx.
-    const wood = (g.items.byName("resourceWood") orelse return error.SkipZigTest).id;
-    g.sim.inventory[ps].slots[3] = .{ .item_id = wood, .count = 10 };
-
-    // Stock InvTx: SetAbsolute at index 3 with a bogus, unresolvable type id.
-    var body: [256]u8 = undefined;
-    var w: binary.Writer = .{ .buf = &body };
-    try w.writeI32(1); // inventoryCount
-    for (0..16) |i| try w.writeByte(@intCast(i)); // guid
-    try w.writeI32(0); // initialHash
-    try w.writeI32(0); // finalHash
-    try w.writeI32(1); // opCount
-    try w.writeI16(0); // SetAbsolute
-    try packages.stock_inv.writeItemStack(&w, .{ .type_id = packages.stock_inv.items_start_here + 50000, .count = 1 });
-    try w.writeI32(3); // index slot 3
-    var frame_buf: [300]u8 = undefined;
-    const rejects_before = g.harness.counters.get(.c2s_rejects);
-    try g.injectFramed(c, try packages.framed(&frame_buf, "NetPackageInventoryTransactionRequest", w.written()));
-    try std.testing.expect(g.harness.counters.get(.c2s_rejects) > rejects_before);
-    // The slot is untouched (rejected, not cleared).
-    try std.testing.expectEqual(@as(u16, wood), g.sim.inventory[ps].slots[3].item_id);
-    try std.testing.expectEqual(@as(u16, 10), g.sim.inventory[ps].slots[3].count);
-    std.debug.print("PASS stock-tx-reject: c2s_rejects {d}->{d} slot3 intact\n", .{ rejects_before, g.harness.counters.get(.c2s_rejects) });
-
-    // The op index is a raw i32 off the wire while the slot array holds
-    // max_inv_slots, so an index past the end (or negative) has to fail the
-    // transaction before it is used to write. Same body shape with a
-    // resolvable item, so the index is the only thing wrong with it.
-    const good_type = packages.stock_inv.items_start_here + @as(i32, wood);
-    // Pin that the stack itself is fine: with an unresolvable type the T18
-    // reject above fires first and the index bound never runs, which makes a
-    // green test prove nothing.
-    try std.testing.expectEqual(wood, g.items.ecsIdFromStockType(good_type));
-    for ([_]i32{ @intCast(quest_mod_components.max_inv_slots), -1 }) |bad_index| {
-        var ob: [256]u8 = undefined;
-        var ow: binary.Writer = .{ .buf = &ob };
-        try ow.writeI32(1);
-        for (0..16) |i| try ow.writeByte(@intCast(i));
-        try ow.writeI32(0);
-        try ow.writeI32(0);
-        try ow.writeI32(1); // opCount
-        try ow.writeI16(0); // SetAbsolute
-        try packages.stock_inv.writeItemStack(&ow, .{ .type_id = packages.stock_inv.items_start_here + @as(i32, wood), .count = 1 });
-        try ow.writeI32(bad_index);
-        var ofb: [300]u8 = undefined;
-        try g.injectFramed(c, try packages.framed(&ofb, "NetPackageInventoryTransactionRequest", ow.written()));
-        // Slot 3 still carries what the earlier reject left there: nothing was
-        // applied, and no write landed anywhere the index could have reached.
-        try std.testing.expectEqual(@as(u16, wood), g.sim.inventory[ps].slots[3].item_id);
-        try std.testing.expectEqual(@as(u16, 10), g.sim.inventory[ps].slots[3].count);
-    }
-    std.debug.print("PASS stock-tx-reject: an out-of-range op index is rejected\n", .{});
-}
-
-test "scenario stock InvTx shadow counts an unbacked stack (T18 stage 1)" {
-    // The client push still commits. The shadow counter moves only when the
-    // staged stack is an item the server did not already hold, or a larger
-    // count than it held. A rewrite of the same stack must not move it.
-    io_fs.mkdirPath("worlds");
-    freshScenarioDir("worlds/zdtd_sc_stocktx_shadow");
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
-    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_stocktx_shadow", 0);
-    defer g.destroy();
-    var cap: ln_peer.Capture = .{};
-    const c = try g.attachJoinedClient(&cap);
-    const ps = g.sim.playerByPeer(c.slot).?;
-    const wood = (g.items.byName("resourceWood") orelse return error.SkipZigTest).id;
-    const good_type = packages.stock_inv.items_start_here + @as(i32, wood);
-
-    const before = g.harness.counters.get(.inv_ledger_events);
-    var body: [256]u8 = undefined;
-    var w: binary.Writer = .{ .buf = &body };
-    try w.writeI32(1);
-    for (0..16) |i| try w.writeByte(@intCast(i));
-    try w.writeI32(0);
-    try w.writeI32(0);
-    try w.writeI32(1);
-    try w.writeI16(0);
-    try packages.stock_inv.writeItemStack(&w, .{ .type_id = good_type, .count = 7 });
-    try w.writeI32(3);
-    var frame_buf: [300]u8 = undefined;
-    try g.injectFramed(c, try packages.framed(&frame_buf, "NetPackageInventoryTransactionRequest", w.written()));
-    try std.testing.expectEqual(before + 1, g.harness.counters.get(.inv_ledger_events));
-    try std.testing.expectEqual(wood, g.sim.inventory[ps].slots[3].item_id);
-    try std.testing.expectEqual(@as(u16, 7), g.sim.inventory[ps].slots[3].count);
-
-    var same: [256]u8 = undefined;
-    var sw: binary.Writer = .{ .buf = &same };
-    try sw.writeI32(1);
-    for (0..16) |i| try sw.writeByte(@intCast(i));
-    try sw.writeI32(0);
-    try sw.writeI32(0);
-    try sw.writeI32(1);
-    try sw.writeI16(0);
-    try packages.stock_inv.writeItemStack(&sw, .{ .type_id = good_type, .count = 7 });
-    try sw.writeI32(3);
-    var same_frame: [300]u8 = undefined;
-    try g.injectFramed(c, try packages.framed(&same_frame, "NetPackageInventoryTransactionRequest", sw.written()));
-    try std.testing.expectEqual(before + 1, g.harness.counters.get(.inv_ledger_events));
 }
 
 test "scenario whitelist gate fails closed on an un-keyable identity (admin audit)" {
@@ -9745,7 +9607,6 @@ test "scenario world container loot rolls on first open, not at load" {
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
     var frame_buf: [8192]u8 = undefined;
-    var req: [36]u8 = undefined;
 
     // A world container as the chunk scan leaves it: sized, loot list known,
     // nothing rolled.
@@ -9757,10 +9618,8 @@ test "scenario world container loot rolls on first open, not at load" {
     try std.testing.expect(!cont.touched);
     for (cont.slots[0..cont.slot_count]) |s| try std.testing.expectEqual(@as(u16, 0), s.count);
 
-    @memcpy(req[0..16], &cont.inv_guid);
-    std.mem.writeInt(i32, req[16..20], 0, .little);
-    @memcpy(req[20..36], &cont.inv_guid);
-    try g.injectFramed(c, try packages.framed(&frame_buf, "NetPackageInventoryDataRequest", &req));
+    // b18 opens the container with a lock request on a tile_entity target.
+    try injectLockOpen(g, c, &frame_buf, 0, pos.x, pos.y, pos.z);
     try std.testing.expect(cont.touched);
     try std.testing.expectEqual(g.sim.director.clock.day, cont.touched_day);
     var rolled: usize = 0;
@@ -9774,10 +9633,7 @@ test "scenario world container loot rolls on first open, not at load" {
     const pcont = g.containers.getOrCreate(ppos, 8, chest_id) orelse return error.TestUnexpectedResult;
     pcont.player_storage = true;
     pcont.loot_list = "woodenChest";
-    @memcpy(req[0..16], &pcont.inv_guid);
-    std.mem.writeInt(i32, req[16..20], 0, .little);
-    @memcpy(req[20..36], &pcont.inv_guid);
-    try g.injectFramed(c, try packages.framed(&frame_buf, "NetPackageInventoryDataRequest", &req));
+    try injectLockOpen(g, c, &frame_buf, 1, ppos.x, ppos.y, ppos.z);
     try std.testing.expect(!pcont.touched);
     for (pcont.slots[0..pcont.slot_count]) |s| try std.testing.expectEqual(@as(u16, 0), s.count);
     std.debug.print("PASS loot-open: world chest rolls {d} stacks on first open, player storage untouched\n", .{rolled});
@@ -9804,7 +9660,6 @@ test "scenario container data request beyond edit reach is refused" {
     const ep = g.sim.transform[ps];
     const chest_id: u16 = @intCast(packages.stock_deco.cnt_wooden_chest_closed);
     var fb: [8192]u8 = undefined;
-    var req: [36]u8 = undefined;
 
     // Within reach: served, so the far refusal below is the reach gate and not
     // a request body the parser rejects for some other reason.
@@ -9812,11 +9667,11 @@ test "scenario container data request beyond edit reach is refused" {
     const ncont = g.containers.getOrCreate(near, 8, chest_id) orelse return error.TestUnexpectedResult;
     ncont.player_storage = false;
     ncont.loot_list = "woodenChest";
-    @memcpy(req[0..16], &ncont.inv_guid);
-    std.mem.writeInt(i32, req[16..20], 0, .little);
-    @memcpy(req[20..36], &ncont.inv_guid);
-    try g.injectFramed(c, try packages.framed(&fb, "NetPackageInventoryDataRequest", &req));
+    try injectLockOpen(g, c, &fb, 0, near.x, near.y, near.z);
     try std.testing.expect(ncont.touched);
+    // Close the near lock so the peer holds nothing; otherwise stock gate 1
+    // force-unlocks on the far open and returns before the reach check runs.
+    try injectLockClose(g, c, &fb, 0);
 
     // Same request shape, container well beyond reach: refused. No loot roll,
     // and the seeded stack is still the server's own, so the read never
@@ -9827,10 +9682,8 @@ test "scenario container data request beyond edit reach is refused" {
     fcont.loot_list = "woodenChest";
     fcont.setSlot(0, .{ .item_id = 1, .count = 5, .quality = 1 });
     fcont.touched = false; // setSlot counts as a write; the open must not.
-    @memcpy(req[0..16], &fcont.inv_guid);
-    @memcpy(req[20..36], &fcont.inv_guid);
     const before = g.harness.counters.get(.bounds_rejects);
-    try g.injectFramed(c, try packages.framed(&fb, "NetPackageInventoryDataRequest", &req));
+    try injectLockOpen(g, c, &fb, 1, far.x, far.y, far.z);
     try std.testing.expect(g.harness.counters.get(.bounds_rejects) > before);
     try std.testing.expect(!fcont.touched);
     try std.testing.expectEqual(@as(u16, 1), fcont.slots[0].item_id);
@@ -9873,7 +9726,7 @@ test "scenario container loot respawns after LootRespawnDays" {
     cont.touched = true;
     cont.player_storage = false; // world container: eligible for respawn
     cont.touched_day = 0; // pre-save default: older than the interval
-    try g.injectFramed(c, try packages.framed(&frame_buf, "NetPackageInventoryDataRequest", &req));
+    try injectLockOpen(g, c, &frame_buf, 0, pos.x, pos.y, pos.z);
     var refilled = false;
     for (cont.slots[0..cont.slot_count]) |s| {
         if (s.count > 0 and s.item_id != 0) {
@@ -9926,8 +9779,7 @@ test "scenario loot container size comes from the loot.xml size attr" {
     var req: [36]u8 = undefined;
     @memcpy(req[0..16], &cont.inv_guid);
     std.mem.writeInt(i32, req[16..20], 0, .little);
-    @memcpy(req[20..36], &cont.inv_guid);
-    try g.injectFramed(c, try packages.framed(&frame_buf, "NetPackageInventoryDataRequest", &req));
+    try injectLockOpen(g, c, &frame_buf, 0, pos.x, pos.y, pos.z);
     try std.testing.expectEqual(@as(u16, 12), cont.slot_count);
     // The rolled loot fits the sized grid and the wire derives 2x6 from it.
     var filled: u16 = 0;
@@ -13563,105 +13415,6 @@ test "scenario blood-moon music is per-party, not global" {
     std.debug.print("PASS bm-wire: edge broadcast fires and holds, join bundle replays\n", .{});
 }
 
-test "scenario stock InventoryTransaction applies and acks" {
-    // A real stock client sends InventoryTransaction.Write (RE
-    // protocol-packages.md 6.13), which the native parser cannot read. The
-    // server now applies the ops to the player's inventory (SetAll replaces
-    // the array) and replies with the stock minimal ack (success + count 0).
-    var tmp = std.testing.tmpDir(.{});
-    defer tmp.cleanup();
-    const dir = try test_tmp.rootOf(&tmp);
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
-    const g = try game_mod.Game.create(gpa, dir, 0);
-    defer g.destroy();
-    var cap: ln_peer.Capture = .{};
-    const c = try g.attachJoinedClient(&cap);
-    const ps = g.sim.playerByPeer(c.slot).?;
-    // The starter kit puts wood at some slot; remember the first non-empty
-    // slot so SetAll's replacement is observable.
-    var wood_slot: usize = std.math.maxInt(usize);
-    for (g.sim.inventory[ps].slots, 0..) |sl, i| {
-        if (sl.item_id == 7) {
-            wood_slot = i;
-            break;
-        }
-    }
-    if (wood_slot == std.math.maxInt(usize)) return error.SkipZigTest;
-
-    // Stock SetAll body: 1 inventory, Guid, hashes, opCount 1, op 2 with an
-    // empty array (count 0 = clear).
-    var body: [128]u8 = undefined;
-    var w: binary.Writer = .{ .buf = &body };
-    try w.writeI32(1);
-    for (0..16) |i| try w.writeByte(@intCast(i));
-    try w.writeI32(1);
-    try w.writeI32(2);
-    try w.writeI32(1); // opCount
-    try w.writeI16(2); // SetAll
-    try w.writeI16(0); // empty array
-    var fb: [192]u8 = undefined;
-    cap.clear();
-    try g.injectFramed(c, try packages.framed(&fb, "NetPackageInventoryTransactionRequest", w.written()));
-    try std.testing.expectEqual(@as(u16, 0), g.sim.inventory[ps].slots[wood_slot].item_id);
-    // The stock minimal ack arrives (success true + count 0).
-    const ack_id = packages.idOf("NetPackageInventoryTransactionResponse").?;
-    var got_ack = false;
-    for (cap.slots[0..cap.n]) |s| {
-        var pkgs: [8]wire_frame.Package = undefined;
-        const pn = wire_frame.parseChannelPayloadForTest(s.data[0..s.len], &pkgs);
-        for (pkgs[0..pn]) |p| {
-            if (p.id == ack_id and p.body.len >= 5 and p.body[0] == 1) got_ack = true;
-        }
-    }
-    try std.testing.expect(got_ack);
-    std.debug.print("PASS stock-invtx: SetAll applied + minimal ack\n", .{});
-
-    // The decoder accepts a SetAll array up to stock_tx_setall_cap (128), but
-    // the inventory holds max_inv_slots (67). A count between the two decodes
-    // fine and then indexes past the destination array, so the handler has to
-    // reject it rather than copy what fits. Empty stacks keep the body small:
-    // ItemStack.Write is a bare u16 count when the count is zero.
-    const over_n: i16 = @intCast(quest_mod_components.max_inv_slots + 1);
-    try std.testing.expect(over_n <= @as(i16, @intCast(packages.stock_tx_setall_cap)));
-    var big: [512]u8 = undefined;
-    var bw: binary.Writer = .{ .buf = &big };
-    try bw.writeI32(1);
-    for (0..16) |i| try bw.writeByte(@intCast(i));
-    try bw.writeI32(1);
-    try bw.writeI32(2);
-    try bw.writeI32(1); // opCount
-    try bw.writeI16(2); // SetAll
-    try bw.writeI16(over_n);
-    for (0..@intCast(over_n)) |_| try bw.writeU16(0); // empty ItemStack
-    // Put something back in the slot so a wrongly-applied SetAll is visible.
-    g.sim.inventory[ps].slots[wood_slot] = .{ .item_id = 1, .count = 1 };
-    var fb2: [640]u8 = undefined;
-    cap.clear();
-    try g.injectFramed(c, try packages.framed(&fb2, "NetPackageInventoryTransactionRequest", bw.written()));
-    // Rejected: the slot the client tried to clear is untouched, so nothing
-    // was applied before the bound was hit.
-    try std.testing.expectEqual(@as(u16, 1), g.sim.inventory[ps].slots[wood_slot].item_id);
-    // No ack either. Stock `TransactionRequestServer` (IL=46, RE items.md
-    // "Server TransactionRequestServer") sends the minimal ack only on the
-    // success path; a failed Apply logs and force-unlocks instead. An ack
-    // here would tell the client a rejected transaction went through.
-    for (cap.slots[0..cap.n]) |s| {
-        var pkgs2: [8]wire_frame.Package = undefined;
-        const pn2 = wire_frame.parseChannelPayloadForTest(s.data[0..s.len], &pkgs2);
-        for (pkgs2[0..pn2]) |p| {
-            try std.testing.expect(p.id != ack_id);
-        }
-    }
-    std.debug.print("PASS stock-invtx: an over-cap SetAll is rejected, not clamped\n", .{});
-}
-
-// ---------------------------------------------------------------------------
-// PRD 0005 / RFC 0005: module tiers, discovery, disabled/blacklist, exclusive
-// core override points, and mod-replaces-mod (AC1-AC8).
-// ---------------------------------------------------------------------------
-
 const plugin_mod = @import("../plugin/root.zig");
 
 fn mkManifest(name: []const u8, wasm: []const u8, tier: ?[]const u8, override: ?[]const u8, points: ?[]const u8, enabled: ?bool) plugin_mod.manifest.Manifest {
@@ -14538,28 +14291,35 @@ test "scenario animation data relays to the other players" {
         // empty slot is the bare `0` its version field would carry. Stock
         // writes version 4; versions 2 and up also carry the cosmetic tail.
         // 4 id + 1 version + 12 null slots + 12 cosmetic i32 + 4 unlocked.
-        var eq: [256]u8 = undefined;
-        var ew = binary.Writer{ .buf = &eq };
-        try ew.writeI32(ca.entity_id);
-        try ew.writeByte(4); // version -> 12 equipment slots
+        // b18 body (§1.5.5): entityId | blobLen | blob(Equipment.Write).
+        var blob: [256]u8 = undefined;
+        var ebw = binary.Writer{ .buf = &blob };
+        try ebw.writeByte(4); // Equipment version -> equipment_slots (13 in b18)
         // Slot 3 carries a real item: an all-empty body cannot tell a correct
         // parse from one that mis-tracks the slot cursor, which is how the
         // presence-bool bug survived here.
         const worn_stock: i32 = packages.stock_inv.items_start_here + 5;
-        for (0..12) |i| {
+        for (0..packages.stock_inv.equipment_slots) |i| {
             if (i == 3) {
-                try packages.stock_inv.writeItemValue(&ew, .{ .type_id = worn_stock, .count = 1 });
+                try packages.stock_inv.writeItemValue(&ebw, .{ .type_id = worn_stock, .count = 1 });
             } else {
-                try ew.writeByte(0); // null ItemValue
+                try ebw.writeByte(0); // null ItemValue
             }
         }
-        for (0..12) |_| try ew.writeI32(0); // cosmetic ids
-        try ew.writeI32(0); // unlocked cosmetics count
+        for (0..packages.stock_inv.equipment_slots) |_| try ebw.writeI32(0); // cosmetic ids
+        try ebw.writeI32(0); // unlocked cosmetics count
+        const blob_bytes = ebw.written();
+        var eq: [512]u8 = undefined;
+        var ew = binary.Writer{ .buf = &eq };
+        try ew.writeI32(ca.entity_id);
+        try ew.writeI32(@intCast(blob_bytes.len)); // blobLen
+        try ew.writeBytes(blob_bytes);
+        const framed_body = ew.written();
         cap_b.clear();
-        try g.injectFramed(ca, try packages.framed(&fb, "NetPackagePlayerEquipment", ew.written()));
+        try g.injectFramed(ca, try packages.framed(&fb, "NetPackagePlayerEquipment", framed_body));
         const got_eq = cap_b.findPkgIdEntity(eq_id, ca.entity_id) orelse
             return error.TestUnexpectedResult;
-        try std.testing.expectEqualSlices(u8, ew.written(), got_eq);
+        try std.testing.expectEqualSlices(u8, framed_body, got_eq);
         // The parser landed the item in the slot it was written to, and left
         // its neighbours empty: a cursor that drifted by one byte would not.
         {
@@ -16809,71 +16569,6 @@ test "scenario blood moon bonus loot survives the per-tick cadence re-push" {
     std.debug.print("PASS blood moon bonus: the cadence counter is not reset by the per-tick re-push\n", .{});
 }
 
-test "scenario stock inventory transaction is all-or-nothing" {
-    // Stock applies the whole InventoryTransaction then checks
-    // ValidateFinalHashes (InventoryManager::TransactionRequestServer IL=46);
-    // a failure logs, force-unlocks and sends no response, so a rejected
-    // transaction never leaves half its ops applied. zdtd's SetAbsolute arm
-    // wrote straight into the live inventory, so an op that failed after an
-    // earlier one had landed left those stacks applied, unclamped (the clamp
-    // sits in the success branch) and unreplicated.
-    io_fs.mkdirPath("worlds");
-    freshScenarioDir("worlds/zdtd_sc_invtx");
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
-    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_invtx", 0);
-    defer g.destroy();
-
-    var cap: ln_peer.Capture = .{};
-    const c = try g.attachJoinedClient(&cap);
-    const ps = g.sim.playerByPeer(c.slot).?;
-    const resp_id = packages.idOf("NetPackageInventoryTransactionResponse").?;
-
-    // A known-good stack for op 1, then an unresolvable one for op 2. The
-    // second op is the T18 reject: a non-empty stack whose type resolves to
-    // no server catalog item fails the transaction.
-    const before = g.sim.inventory[ps].slots[0];
-
-    var body: [512]u8 = undefined;
-    var w = binary.Writer{ .buf = &body };
-    try w.writeI32(1); // one entry
-    var gi: u8 = 0;
-    while (gi < 16) : (gi += 1) try w.writeByte(0); // guid
-    try w.writeI32(0); // initial hash
-    try w.writeI32(0); // final hash
-    try w.writeI32(2); // two ops
-    // op 1: SetAbsolute at index 0, a resolvable item.
-    try w.writeI16(0);
-    try packages.stock_inv.writeItemStack(&w, .{
-        .type_id = packages.stock_inv.items_start_here + 2,
-        .count = 3,
-        .quality = 1,
-    });
-    try w.writeI32(0);
-    // op 2: SetAbsolute at index 1, a type no catalog resolves.
-    try w.writeI16(0);
-    try packages.stock_inv.writeItemStack(&w, .{
-        .type_id = packages.stock_inv.items_start_here + 30000,
-        .count = 1,
-        .quality = 1,
-    });
-    try w.writeI32(1);
-
-    var fb: [640]u8 = undefined;
-    cap.clear();
-    const rej_before = g.harness.counters.get(.c2s_rejects);
-    try g.injectFramed(c, try packages.framed(&fb, "NetPackageInventoryTransactionRequest", w.written()));
-
-    // The transaction was rejected...
-    try std.testing.expect(g.harness.counters.get(.c2s_rejects) > rej_before);
-    // ...so slot 0 must NOT carry the first op's write, and no ack is sent
-    // (stock's failure path returns without a response).
-    try std.testing.expectEqualDeep(before, g.sim.inventory[ps].slots[0]);
-    try std.testing.expect(cap.findPkgId(resp_id) == null);
-    std.debug.print("PASS invtx: a rejected transaction applies none of its ops\n", .{});
-}
-
 test "scenario pending power wires survive a save/load cycle" {
     // A saved wire whose endpoints are in chunks nobody has visited sits in
     // the grid's pending-reconnect set, not the live wire list:
@@ -17380,11 +17075,11 @@ test "scenario walking away from an open container stops the looting" {
 }
 
 test "scenario the inventory transaction route honours both quarantine surfaces" {
-    // The Bag and TileEntity arms check the container quarantine, and the
-    // SetBlock arm checks the block one. NetPackageInventoryTransactionRequest
-    // reaches both surfaces (open/take/put mutate a container, place writes a
-    // world block) and checked neither, so a quarantined peer kept working
-    // through the transaction route while its direct packets were refused.
+    // b18: the bag and TileEntity arms check the container quarantine, the
+    // SetBlock arm checks the block one. A loot-bag take rides NetPackageBag
+    // (which gates container quarantine) and a place rides NetPackageSetBlock
+    // (which gates block quarantine), so a quarantined peer is refused on each
+    // surface. The removed InventoryTransactionRequest checked neither.
     io_fs.mkdirPath("worlds");
     freshScenarioDir("worlds/zdtd_sc_txq");
     var gpa_impl = std.heap.DebugAllocator(.{}){};
@@ -17403,33 +17098,53 @@ test "scenario the inventory transaction route honours both quarantine surfaces"
     const bag = g.sim.spawnLootBag(t.x, t.y, t.z, 2, 5) orelse return error.TestUnexpectedResult;
     const bs = g.sim.slotOfNetId(bag).?;
 
-    var txb: [64]u8 = undefined;
-    var fb: [128]u8 = undefined;
+    var fb: [9000]u8 = undefined;
 
-    // Clean peer: open then take works, so the gate below is what changes.
-    const open_req = try packages.buildInvTxRequest(&txb, @intFromEnum(invsys.Op.open), 0, 0, 0, bag);
-    try g.injectFramed(c, try packages.framed(&fb, "NetPackageInventoryTransactionRequest", open_req));
-    const take_req = try packages.buildInvTxRequest(&txb, @intFromEnum(invsys.Op.take), 0, 0, 0, -1);
-    try g.injectFramed(c, try packages.framed(&fb, "NetPackageInventoryTransactionRequest", take_req));
+    // A bag write that empties slot 0 (the take the client would push). Built
+    // from the bag entity's inventory with slot 0 already emptied.
+    const emptyTake = struct {
+        fn build(gm: *game_mod.Game, bag_id: i32, bag_slot: usize, out: []u8) !usize {
+            var src = gm.sim.inventory[bag_slot];
+            src.slots[0] = .{};
+            var buf: [16384]u8 = undefined;
+            const bb = try packages.stock_inv.buildBagPackage(&buf, bag_id, &src, null, null, false);
+            if (bb.len > out.len) return error.NoSpaceLeft;
+            @memcpy(out[0..bb.len], bb);
+            return bb.len;
+        }
+    }.build;
+    var take_buf: [16384]u8 = undefined;
+
+    // Clean peer: the bag write commits, so the gate below is what changes.
+    {
+        const blen = try emptyTake(g, bag, bs, &take_buf);
+        try g.injectFramed(c, try packages.framed(&fb, "NetPackageBag", take_buf[0..blen]));
+    }
     try std.testing.expectEqual(@as(u16, 0), g.sim.inventory[bs].slots[0].count);
 
-    // Container-quarantined: the same take is refused and counted.
+    // Container-quarantined: the same bag write is refused and counted.
     g.sim.inventory[bs].slots[0] = .{ .item_id = 2, .count = 5, .quality = 1 };
     g.clients[c.slot].guard.quarantine.container = true;
     const q_before = g.harness.counters.get(.quarantine_rejects);
-    try g.injectFramed(c, try packages.framed(&fb, "NetPackageInventoryTransactionRequest", take_req));
+    {
+        const blen = try emptyTake(g, bag, bs, &take_buf);
+        try g.injectFramed(c, try packages.framed(&fb, "NetPackageBag", take_buf[0..blen]));
+    }
     try std.testing.expectEqual(q_before + 1, g.harness.counters.get(.quarantine_rejects));
     try std.testing.expectEqual(@as(u16, 5), g.sim.inventory[bs].slots[0].count);
 
-    // The block surface is independent: container-only quarantine leaves
-    // place alone, and setting the block bit refuses it.
+    // The block surface is independent: container-only quarantine leaves the
+    // SetBlock place alone, and setting the block bit refuses it.
     g.clients[c.slot].guard.quarantine.container = false;
     g.clients[c.slot].guard.quarantine.setblock = true;
     const q2 = g.harness.counters.get(.quarantine_rejects);
-    const place_req = try packages.buildInvTxRequest(&txb, @intFromEnum(invsys.Op.place), 10, 70, 10, -1);
-    try g.injectFramed(c, try packages.framed(&fb, "NetPackageInventoryTransactionRequest", place_req));
+    {
+        var sbody: [64]u8 = undefined;
+        const sb = try packages.stock_block.buildSetBlockBody(&sbody, 10, 70, 10, 16107);
+        try g.injectFramed(c, try packages.framed(&fb, "NetPackageSetBlock", sb));
+    }
     try std.testing.expectEqual(q2 + 1, g.harness.counters.get(.quarantine_rejects));
-    std.debug.print("PASS invtx quarantine: container and block surfaces both gated\n", .{});
+    std.debug.print("PASS b18 quarantine: bag and SetBlock surfaces both gated\n", .{});
 }
 
 test "scenario every saved inventory slot field survives a restart" {
@@ -25476,12 +25191,10 @@ test "scenario every explicitly client-to-server package reaches a handler" {
         "NetPackageExplosionInitiate",
         "NetPackageGameEventRequest",
         "NetPackageGameEventResponse",
-        "NetPackageInventoryDataRequest",
         "NetPackageInventoryKeepOpen",
-        "NetPackageInventoryTransactionRequest",
         "NetPackageItemDrop",
         "NetPackageLobbyRegisterClient",
-        "NetPackageLockRequest",
+        "NetPackageLockTarget",
         "NetPackageMapPosition",
         "NetPackagePOIMetadataRequest",
         "NetPackagePlayerData",
@@ -26143,4 +25856,266 @@ test "scenario a fetch objective only advances from its own POI" {
     try std.testing.expect(!systems.pointInPoi(q.poi, 500, 500));
     try std.testing.expect(systems.pointInPoi(q.poi, 3, -4));
     std.debug.print("PASS fetch-poi: far container ignored, containment gate answers\n", .{});
+}
+
+test "scenario sign: SingleSignData relays and SignDelete is ownership-gated" {
+    // V3.3.0 b18 sign pushes (protocol-packages.md §1.5.2/§1.5.3). A pushes a
+    // drawing; the server relays it to B (no sender check on upload, matching
+    // stock). A delete for a player library B does not own is refused; a delete
+    // for A's own library relays.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+
+    var cap_a: ln_peer.Capture = .{};
+    var cap_b: ln_peer.Capture = .{};
+    // Both peers need a platform identity so A owns a real player library
+    // (`<platform>_<id>`) that the ownership check can gate on.
+    const ca = try g.attachJoinedClientAs(&cap_a, .{ .platform = "Steam", .id = "1001" });
+    const cb = try g.attachJoinedClientAs(&cap_b, .{ .platform = "Steam", .id = "1002" });
+
+    var mine: [160]u8 = undefined;
+    const a_lib = if (ca.puid_primary.get()) |pid|
+        std.fmt.bufPrint(&mine, "{s}_{s}", .{ pid.platform, pid.id }) catch return error.TestUnexpectedResult
+    else
+        return error.SkipZigTest;
+
+    // --- SingleSignData: A uploads to its library; B receives the relay. ---
+    cap_b.clear();
+    {
+        // A realistic SignData blob head: version=3 (i32) then the 16-byte
+        // guid the store keys on, then a tail (signs.md §2).
+        var a_guid: [16]u8 = @splat(0);
+        a_guid[0] = 7;
+        var body: [512]u8 = undefined;
+        var w: binary.Writer = .{ .buf = &body };
+        try w.writeString(a_lib);
+        var a_blob: [24]u8 = undefined;
+        var bw: binary.Writer = .{ .buf = &a_blob };
+        try bw.writeI32(3); // SignData version
+        try bw.writeBytes(&a_guid);
+        try bw.writeBytes(&[_]u8{ 9, 9, 9 });
+        const a_blob_len = bw.written().len;
+        try w.writeI32(@intCast(a_blob_len));
+        try w.writeBytes(a_blob[0..a_blob_len]);
+        var fb: [640]u8 = undefined;
+        try g.injectFramed(ca, try packages.framed(&fb, "NetPackageSingleSignData", w.written()));
+        // Stored under A's library so a later join re-serves it (§7).
+        try std.testing.expectEqual(@as(usize, 1), g.player_signs.liveCount());
+    }
+
+    const ss_id = packages.idOf("NetPackageSingleSignData").?;
+    _ = cap_b.findPkgId(ss_id) orelse return error.TestUnexpectedResult; // B saw it
+    try std.testing.expect(cap_a.findPkgId(ss_id) == null); // not echoed to A
+
+    // The join download re-serves the stored player sign: a SignDataResponse
+    // carries A's library id and the blob verbatim (raw batch, §7). This clears
+    // cap_b, so it runs after the relay assertions above.
+    {
+        cap_b.clear();
+        var req_frame: [64]u8 = undefined;
+        try g.injectFramed(cb, try packages.framed(&req_frame, "NetPackageSignDataRequest", &[_]u8{}));
+        const sdr_id = packages.idOf("NetPackageSignDataResponse").?;
+        const resp = cap_b.findPkgId(sdr_id) orelse return error.TestUnexpectedResult;
+        var rr: binary.Reader = .{ .data = resp[9..] };
+        var lb: [160]u8 = undefined;
+        const got_lib = try rr.readString(&lb);
+        try std.testing.expectEqualStrings(a_lib, got_lib);
+        var a_guid_chk: [16]u8 = @splat(0);
+        a_guid_chk[0] = 7;
+        try std.testing.expectEqual(@as(i32, 3), try rr.readI32()); // version
+        try std.testing.expectEqualSlices(u8, &a_guid_chk, rr.data[rr.pos..][0..16]);
+    }
+
+    // An empty blob is dropped, not relayed.
+    cap_b.clear();
+    {
+        var body: [256]u8 = undefined;
+        var w: binary.Writer = .{ .buf = &body };
+        try w.writeString(a_lib);
+        try w.writeI32(0); // empty
+        var fb: [320]u8 = undefined;
+        try g.injectFramed(ca, try packages.framed(&fb, "NetPackageSingleSignData", w.written()));
+    }
+    try std.testing.expect(cap_b.findPkgId(ss_id) == null);
+
+    // --- SignDelete: a foreign player library is refused, then A's own relays. ---
+    const sd_id = packages.idOf("NetPackageSignDelete").?;
+    var guid: [16]u8 = @splat(0);
+    guid[0] = 7;
+
+    // B tries to delete a library it does not own (A's): refused, no relay.
+    cap_a.clear();
+    {
+        var body: [192]u8 = undefined;
+        var w: binary.Writer = .{ .buf = &body };
+        try w.writeString(a_lib);
+        try w.writeBytes(&guid);
+        var fb: [256]u8 = undefined;
+        try g.injectFramed(cb, try packages.framed(&fb, "NetPackageSignDelete", w.written()));
+    }
+    try std.testing.expect(cap_a.findPkgId(sd_id) == null);
+    try std.testing.expect(g.harness.counters.get(.ownership_rejects) > 0);
+
+    // A deletes its own library's sign: relays to B.
+    cap_b.clear();
+    cap_a.clear();
+    {
+        var body: [192]u8 = undefined;
+        var w: binary.Writer = .{ .buf = &body };
+        try w.writeString(a_lib);
+        try w.writeBytes(&guid);
+        var fb: [256]u8 = undefined;
+        try g.injectFramed(ca, try packages.framed(&fb, "NetPackageSignDelete", w.written()));
+    }
+    _ = cap_b.findPkgId(sd_id) orelse return error.TestUnexpectedResult;
+    try std.testing.expect(cap_a.findPkgId(sd_id) == null);
+
+    std.debug.print("PASS sign push: SingleSignData relays, SignDelete ownership-gated\n", .{});
+}
+
+test "scenario console: listitems filters and give applies quality" {
+    // b18 console additions (changelog §7.4): `listitems` prints the item names
+    // containing a substring, `give` takes an optional quality <= 6. Both run
+    // at permission level 0 (default). The give drop carries the quality on a
+    // quality-carrying item.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+
+    // listitems: a substring that matches builtin defs' names.
+    {
+        var sink: [8192]u8 = undefined;
+        g.admin_reply_len = 0;
+        g.admin_reply_sink = sink[0..];
+        g.runAdminLine("listitems wood", "test");
+        g.admin_reply_sink = null;
+        const out = sink[0..g.admin_reply_len];
+        // builtin defs include a name containing "wood" (resourceWood/wood).
+        try std.testing.expect(std.mem.indexOf(u8, out, "wood") != null);
+        try std.testing.expect(std.mem.indexOf(u8, out, "no items matched") == null);
+    }
+
+    // listitems with no match reports none.
+    {
+        var sink: [1024]u8 = undefined;
+        g.admin_reply_len = 0;
+        g.admin_reply_sink = sink[0..];
+        g.runAdminLine("listitems zzznotanitem", "test");
+        g.admin_reply_sink = null;
+        const out = sink[0..g.admin_reply_len];
+        try std.testing.expect(std.mem.indexOf(u8, out, "no items matched") != null);
+    }
+
+    // give with a quality argument: parse + drop. Use a quality-carrying item
+    // if present, else assert the command still drops (quality is ignored for
+    // non-quality items).
+    {
+        var line_buf: [64]u8 = undefined;
+        const line = try std.fmt.bufPrint(&line_buf, "give {d} resourceWood 5 3", .{c.slot});
+        g.admin_reply_len = 0;
+        var sink: [512]u8 = undefined;
+        g.admin_reply_sink = sink[0..];
+        g.runAdminLine(line, "test");
+        g.admin_reply_sink = null;
+        const out = sink[0..g.admin_reply_len];
+        // The drop landed (stock ConsoleCmdGive drops one stack at the feet).
+        try std.testing.expect(std.mem.indexOf(u8, out, "dropped") != null);
+    }
+    // quality > 6 is a bad-arg (stock caps at 6).
+    try std.testing.expect(parseCommandGiveQualityCapped());
+
+    std.debug.print("PASS console: listitems filters, give quality parsed and applied\n", .{});
+}
+
+fn parseCommandGiveQualityCapped() bool {
+    const admin_mod = @import("../server/admin.zig");
+    // quality 7 over stock's cap of 6 -> bad_args.
+    return admin_mod.parseCommand("give 0 resourceWood 5 7") == .bad_args and
+        admin_mod.parseCommand("give 0 resourceWood 5 6") == .give;
+}
+
+test "scenario generator refuel folds AddedFuel into the node (b18 power source)" {
+    // V3.3.0 b18: the client pushes fuel via `NetPackageTileEntity` carrying a
+    // `TileEntityPowerSource` ToServer body (`AddedFuel`, RE
+    // tile-entities-power.md §2.1). The handler folds it into the generator
+    // node clamped to capacity, then echoes the state to peers.
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_refuel");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_refuel", 0);
+    defer g.destroy();
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+
+    const gen_id = g.maxdamage.idByName("generatorbank") orelse return error.SkipZigTest;
+    if (g.power_registry.lookup(gen_id) == null) return error.SkipZigTest;
+    const gx: i32 = 300;
+    const gy: i32 = 70;
+    const gz: i32 = 300;
+    try g.world.setBlockWorld(gx, gy, gz, gen_id);
+    _ = g.sim.power.addNodeAt(.generator, gx, gy, gz, 100) orelse return error.TestUnexpectedResult;
+    const ni = g.sim.power.indexOfPosition(gx, gy, gz) orelse return error.TestUnexpectedResult;
+    g.sim.power.nodes[ni].capacity = 100;
+    g.sim.power.nodes[ni].fuel_or_energy = 10;
+    g.sim.power.resolve();
+
+    // Move the player within edit range of the generator.
+    if (g.sim.slotOfNetId(c.entity_id)) |ps| {
+        g.sim.transform[ps].x = @floatFromInt(gx);
+        g.sim.transform[ps].y = @floatFromInt(gy);
+        g.sim.transform[ps].z = @floatFromInt(gz);
+    }
+
+    // Push 40 fuel via the b18 power-source ToServer body.
+    var buf: [512]u8 = undefined;
+    const body = try packages.stock_te.buildPowerSourceTeBodyToServer(&buf, 255, gx, gy, gz, gen_id, .{
+        .handle = 255,
+        .world_x = gx,
+        .world_y = gy,
+        .world_z = gz,
+        .block_id = gen_id,
+        .is_player_placed = true,
+        .power_item_type = packages.stock_te.power_item_type_generator,
+        .user_accessing = true,
+        .added_fuel = 40,
+        .send_slots = false,
+    });
+    var fb: [640]u8 = undefined;
+    try g.injectFramed(c, try packages.framed(&fb, "NetPackageTileEntity", body));
+
+    // The generator node took the fuel (clamped to capacity).
+    const n2 = g.sim.power.indexOfPosition(gx, gy, gz) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(@as(f32, 50), g.sim.power.nodes[n2].fuel_or_energy);
+
+    // Excess over capacity clamps, never grows past MaxFuel.
+    const body2 = try packages.stock_te.buildPowerSourceTeBodyToServer(&buf, 255, gx, gy, gz, gen_id, .{
+        .handle = 255,
+        .world_x = gx,
+        .world_y = gy,
+        .world_z = gz,
+        .block_id = gen_id,
+        .power_item_type = packages.stock_te.power_item_type_generator,
+        .added_fuel = 999,
+        .send_slots = false,
+    });
+    try g.injectFramed(c, try packages.framed(&fb, "NetPackageTileEntity", body2));
+    const n3 = g.sim.power.indexOfPosition(gx, gy, gz) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(@as(f32, 100), g.sim.power.nodes[n3].fuel_or_energy);
+
+    std.debug.print("PASS refuel: AddedFuel folds into the generator, clamped to capacity\n", .{});
 }

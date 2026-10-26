@@ -16,7 +16,7 @@ Canonical modding guide: [MODDING_BEST_PRACTICES.md](https://github.com/hordefor
 | Doc index | [`docs/INDEX.md`](docs/INDEX.md) |
 | Metrics | [`docs/APM.md`](docs/APM.md) · `src/apm/` |
 
-Target: **V3.2.0 b10** (Mono) wire, **20 TPS** (50 ms) tick. Use the exact Zig version in [`.zigversion`](.zigversion) (currently 0.16.0); `make release-check` enforces the pin. Do not float past that pin. Validate via loadgen + stock client (EAC off) + **zdtd** apm dumps.
+Target: **V3.3.0 b18** (Mono) wire, **20 TPS** (50 ms) tick. Use the exact Zig version in [`.zigversion`](.zigversion) (currently 0.16.0); `make release-check` enforces the pin. Do not float past that pin. Validate via loadgen + stock client (EAC off) + **zdtd** apm dumps.
 
 ## Principles
 

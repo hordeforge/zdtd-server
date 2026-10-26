@@ -15,11 +15,18 @@ pub const SignEntry = signs.SignEntry;
 /// either way, more batches, same drawings.
 pub const max_batch_payload: usize = 48 * 1024;
 
-/// Encode SignData with its layer stack (research gameplay/signs.md §2:
-/// guid, name, ticks, four next-ids, layer count, then each layer as TypeId
-/// byte + InternalWrite payload + shared tail). A layer that fails to encode
-/// aborts the entry (fail closed) rather than sending a truncated drawing.
+/// `SignData.Write` binary version the b18 client stamps and reads
+/// (`cCurrentBinaryVersion`; signs.md §2). `Read` rejects a blob whose version
+/// is out of 1..=3, so this head must be present or the client drops the entry.
+pub const sign_data_version: i32 = 3;
+
+/// Encode SignData with its layer stack (research gameplay/signs.md §2):
+/// version, guid, name, ticks, four next-ids, sharing byte, layer count, then
+/// each layer as TypeId byte + InternalWrite payload + shared tail. A layer
+/// that fails to encode aborts the entry (fail closed) rather than sending a
+/// truncated drawing.
 pub fn writeSignData(w: *binary.Writer, e: SignEntry) !void {
+    try w.writeI32(sign_data_version); // version head (b18, signs.md §2)
     try w.writeBytes(&e.guid);
     try w.writeString(e.name);
     try w.writeI64(e.modified_ticks);
@@ -27,6 +34,7 @@ pub fn writeSignData(w: *binary.Writer, e: SignEntry) !void {
     try w.writeI32(e.next_text);
     try w.writeI32(e.next_noise);
     try w.writeI32(e.next_group);
+    try w.writeByte(e.sharing); // SignSharing: Private=0, Selectable=1, Copyable=2
     try w.writeI32(@intCast(e.layers.len));
     for (e.layers) |l| try writeLayer(w, l);
 }
@@ -190,9 +198,121 @@ pub fn buildSignDataResponseBatch(
     return .{ .body = buf[0..end_pos], .next = i };
 }
 
+/// A `(libraryId, raw SignData blob)` pair for the player-library batch.
+pub const RawSignEntry = struct { library_id: []const u8, blob: []const u8 };
+
+/// Build one `NetPackageSignDataResponse` batch over player-library signs
+/// (V3.3.0 b18; `../7dtd-engine-research/docs/gameplay/signs.md` §7, join shape
+/// `../7dtd-engine-research/docs/network/protocol-packages.md` §1.5.7): the
+/// payload is `[string libraryId, SignData.Read] x N` and each blob is already a
+/// serialized `SignData` (the client sent it as one), so it is written verbatim
+/// rather than re-encoded. Same envelope as `buildSignDataResponseBatch`
+/// (isLast | dataLen | u32 size marker | payload).
+pub fn buildSignDataResponseBatchRaw(
+    buf: []u8,
+    entries: []const RawSignEntry,
+    start: usize,
+    is_last: bool,
+) !struct { body: []u8, next: usize } {
+    if (buf.len < 32) return error.Overflow;
+    const data_start: usize = 1 + 4;
+    const size_off = data_start;
+    const payload_off = size_off + 4;
+    if (payload_off >= buf.len) return error.Overflow;
+
+    var w: binary.Writer = .{ .buf = buf, .pos = payload_off };
+    var i = start;
+    while (i < entries.len) : (i += 1) {
+        const before = w.pos;
+        if (writeRawSignEntry(&w, entries[i])) |_| {} else |_| {
+            w.pos = before;
+            break;
+        }
+        if (w.pos - data_start > max_batch_payload and i > start) {
+            w.pos = before;
+            break;
+        }
+    }
+    if (i == start and start < entries.len) {
+        w.pos = payload_off;
+        try writeRawSignEntry(&w, entries[start]);
+        i = start + 1;
+    }
+
+    const end_pos = w.pos;
+    const size_incl: u32 = @intCast(end_pos - size_off);
+    std.mem.writeInt(u32, buf[size_off..][0..4], size_incl, .little);
+    const data_len: i32 = @intCast(end_pos - data_start);
+    buf[0] = @intFromBool(is_last and i >= entries.len);
+    std.mem.writeInt(i32, buf[1..5], data_len, .little);
+    return .{ .body = buf[0..end_pos], .next = i };
+}
+
+fn writeRawSignEntry(w: *binary.Writer, e: RawSignEntry) !void {
+    try w.writeString(e.library_id);
+    try w.writeBytes(e.blob);
+}
+
 fn writeSignEntry(w: *binary.Writer, e: SignEntry) !void {
     try w.writeString(e.library);
     try writeSignData(w, e);
+}
+
+/// A parsed `NetPackageSingleSignData` body (protocol-packages.md §1.5.2):
+/// `libraryId string | i32 signBlobLen | signBlob bytes`.
+pub const SingleSignData = struct {
+    library_id: []const u8,
+    blob: []const u8,
+};
+
+/// Parse `NetPackageSingleSignData`. A non-positive `signBlobLen` yields a
+/// null blob, which the caller drops (stock logs an empty blob and ignores it,
+/// §1.5.2). `lib_buf` holds the decoded library id; `blob` slices `body`.
+pub fn parseSingleSignData(body: []const u8, lib_buf: []u8) !SingleSignData {
+    var r: binary.Reader = .{ .data = body };
+    const lib = try r.readString(lib_buf);
+    const blob_len = try r.readI32();
+    if (blob_len <= 0) return .{ .library_id = lib, .blob = &.{} };
+    const n: usize = @intCast(blob_len);
+    if (n > r.remaining()) return error.EndOfStream;
+    const blob = r.data[r.pos..][0..n];
+    return .{ .library_id = lib, .blob = blob };
+}
+
+/// A parsed `NetPackageSignDelete` body (protocol-packages.md §1.5.3):
+/// `GlobalSignId` = `libraryId string | 16 raw Guid bytes`.
+pub const SignDelete = struct {
+    library_id: []const u8,
+    sign_guid: [16]u8,
+};
+
+/// Parse `NetPackageSignDelete`. Fails closed on a truncated guid.
+pub fn parseSignDelete(body: []const u8, lib_buf: []u8) !SignDelete {
+    var r: binary.Reader = .{ .data = body };
+    const lib = try r.readString(lib_buf);
+    if (r.remaining() < 16) return error.EndOfStream;
+    var guid: [16]u8 = undefined;
+    @memcpy(&guid, r.data[r.pos..][0..16]);
+    r.pos += 16;
+    return .{ .library_id = lib, .sign_guid = guid };
+}
+
+test "raw sign batch writes libraryId and verbatim blob" {
+    const blob = [_]u8{ 3, 0, 0, 0, 1, 2, 3, 4 };
+    const entries = [_]RawSignEntry{
+        .{ .library_id = "Steam_1001", .blob = &blob },
+    };
+    var buf: [256]u8 = undefined;
+    const r = try buildSignDataResponseBatchRaw(&buf, &entries, 0, true);
+    try std.testing.expectEqual(@as(usize, 1), r.next);
+    try std.testing.expectEqual(@as(u8, 1), r.body[0]); // isLast
+    // Payload: library string, then the blob verbatim.
+    var rd: binary.Reader = .{ .data = r.body[9..] };
+    var s_buf: [32]u8 = undefined;
+    try std.testing.expectEqualStrings("Steam_1001", try rd.readString(&s_buf));
+    try std.testing.expectEqualSlices(u8, &blob, rd.data[rd.pos..][0..blob.len]);
+    rd.pos += blob.len;
+    try std.testing.expectEqual(@as(usize, 0), rd.remaining());
 }
 
 test "sign batch empty layers" {
@@ -218,12 +338,13 @@ test "sign batch empty layers" {
     const dlen = std.mem.readInt(i32, r.body[1..5], .little);
     try std.testing.expect(dlen > 4);
 
-    // SignData is positional and nothing read it back: isLast | dataLen i32 |
-    // size marker u32 | library string | guid[16] | name string | ticks i64 |
-    // nextPoly | nextText | nextNoise | nextGroup | layer count, all i32.
+    // SignData is positional: isLast | dataLen i32 | size marker u32 |
+    // library string | version i32 | guid[16] | name string | ticks i64 |
+    // nextPoly | nextText | nextNoise | nextGroup | sharing u8 | layer count.
     var rd: binary.Reader = .{ .data = r.body[9..] }; // past isLast, dataLen, marker
     var s_buf: [64]u8 = undefined;
     try std.testing.expectEqualStrings("house_01", try rd.readString(&s_buf));
+    try std.testing.expectEqual(@as(i32, sign_data_version), try rd.readI32()); // version
     try std.testing.expectEqualSlices(u8, &g, rd.data[rd.pos..][0..16]);
     rd.pos += 16;
     try std.testing.expectEqualStrings("Front", try rd.readString(&s_buf));
@@ -232,6 +353,7 @@ test "sign batch empty layers" {
     try std.testing.expectEqual(@as(i32, 12), try rd.readI32()); // nextText
     try std.testing.expectEqual(@as(i32, 13), try rd.readI32()); // nextNoise
     try std.testing.expectEqual(@as(i32, 14), try rd.readI32()); // nextGroup
+    try std.testing.expectEqual(@as(u8, 0), try rd.readByte()); // sharing (Private)
     try std.testing.expectEqual(@as(i32, 0), try rd.readI32()); // layer count
     try std.testing.expectEqual(@as(usize, 0), rd.remaining());
 }
@@ -265,9 +387,11 @@ test "sign layer encode round-trips the stock field order" {
     var rd: binary.Reader = .{ .data = r.body[9..] };
     var s_buf: [64]u8 = undefined;
     try std.testing.expectEqualStrings("lib", try rd.readString(&s_buf));
+    rd.pos += 4; // version head
     rd.pos += 16; // guid
     try std.testing.expectEqualStrings("S", try rd.readString(&s_buf));
     rd.pos += 8 + 16; // ticks + four next-ids
+    rd.pos += 1; // sharing byte
     try std.testing.expectEqual(@as(i32, 1), try rd.readI32()); // layer count
     try std.testing.expectEqual(@as(u8, 2), try rd.readByte()); // polygon TypeId
     try std.testing.expectEqual(@as(i32, 4), try rd.readI32()); // sides

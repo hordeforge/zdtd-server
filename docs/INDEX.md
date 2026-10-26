@@ -9,7 +9,7 @@ round-trip test proves self-consistency, not stock compatibility. A claim about
 stock behaviour needs an IL anchor (method plus line) or an observation from the
 real client.
 
-**Version pin:** the supported stock client wire is **V3.2.0 b10** (Mono, EAC
+**Version pin:** the supported stock client wire is **V3.3.0 b18** (Mono, EAC
 off; see `src/version.zig` and [STATUS.md](STATUS.md)). IL citations of the form
 `asm.il:NNNN` still refer to the V3.1.0 single-file dump whose identity (size,
 line count, MD5) is recorded in

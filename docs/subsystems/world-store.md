@@ -124,7 +124,7 @@ pub const Container = struct {
     /// Persisted in ZCT3 so a restarted container keeps its real grid shape
 ```
 
-`inv_guid` is deterministic from the position rather than a random GUID, so a client-issued inventory key resolves back to the same container across restarts (`guidFromPos`/`posFromGuid`, `src/world/containers.zig:66-88`); it is the key the C2S inventory path resolves (`src/server/c2s/inv_txn.zig:253`). The table holds 4096 containers (`src/world/containers.zig:15`). When it fills, `getOrCreate` evicts a world container (`player_storage == false`), which regenerates from the next chunk scan, and refuses to evict a player-placed one (`src/world/containers.zig:133-163`). Persisted to `containers.zct` as ZCT3 (full InvSlot stride); ZCT1/ZCT2 still load (`src/world/containers.zig:187-205,269-340`).
+`inv_guid` is deterministic from the position rather than a random GUID, so a client-issued inventory key resolves back to the same container across restarts (`guidFromPos`/`posFromGuid`, `src/world/containers.zig:66-88`); it is the key the C2S inventory path resolves (`src/server/c2s/inv_te.zig`). The table holds 4096 containers (`src/world/containers.zig:15`). When it fills, `getOrCreate` evicts a world container (`player_storage == false`), which regenerates from the next chunk scan, and refuses to evict a player-placed one (`src/world/containers.zig:133-163`). Persisted to `containers.zct` as ZCT3 (full InvSlot stride); ZCT1/ZCT2 still load (`src/world/containers.zig:187-205,269-340`).
 
 The other stores are keyed the same way: signs and vending reuse `containers.PosKey`, lights and workstations carry plain `x`/`y`/`z` fields (`src/world/signs.zig:20`; `src/world/vending.zig:18`; `src/world/light_te.zig:18-22`; `src/world/workstations.zig:249-252`). Their record declarations are quoted verbatim below, with unrelated comments and blank lines trimmed. Signs (`src/world/signs.zig:20`):
 
@@ -213,7 +213,7 @@ pub const Workstation = struct {
 
 The `*_len` fields are on-wire array lengths, not used prefixes, so nothing is sent before a client write has told the server the real geometry (`geometry_known`, `src/world/workstations.zig:268-275,286-291`). The store holds 256 stations and persists to `workstations.zws` (magic ZWS1) with records sorted by position (`src/world/workstations.zig:23,702-708`). `removeAt` exists because an entry that outlived its block kept broadcasting and kept coming back from the save file with its old fuel and queue (`src/world/workstations.zig:682-698`).
 
-Instantiation happens on the chunk fill path: containers are seeded from the prefab TE scan and the storage-id block scan (`src/server/game/chunk_fill.zig:306-307,366-386`), lights are parsed from their `.tts` persistency payload (`src/server/game/chunk_fill.zig:348-351`), and C2S block and inventory packages create, mutate and remove entries (`src/server/c2s/inv_txn.zig:113,540,597`; `src/server/c2s/blocks_fx.zig:43-47,396-404`).
+Instantiation happens on the chunk fill path: containers are seeded from the prefab TE scan and the storage-id block scan (`src/server/game/chunk_fill.zig:306-307,366-386`), lights are parsed from their `.tts` persistency payload (`src/server/game/chunk_fill.zig:348-351`), and C2S block and TE packages create, mutate and remove entries (`src/server/c2s/inv_te.zig`; `src/server/c2s/blocks_fx.zig:43-47,396-404`).
 
 ## Derived state that is not persisted
 

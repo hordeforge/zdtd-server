@@ -500,8 +500,8 @@ stateDiagram-v2
 
 Owners: `src/server/game/chunk_fill.zig` (`fillContainerFromLoot`, stamps
 `touched_day`), `src/server/game.zig` (`maybeRespawnContainer` + forwarding
-methods), `src/server/c2s/inv.zig` (re-roll before serving
-`NetPackageInventoryDataRequest`), `src/world/containers.zig`
+methods), `src/server/c2s/misc_lock.zig` (re-roll on the
+`NetPackageLockTarget` open grant), `src/world/containers.zig`
 (`touched` / `touched_day`, `setSlot`).
 
 Notes: `loot_respawn_days = 0` disables the re-roll; the guard order is

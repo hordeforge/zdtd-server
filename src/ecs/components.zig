@@ -916,8 +916,12 @@ pub const inv_toolbelt: usize = 10;
 pub const inv_bag_start: usize = 10;
 pub const inv_bag_count: usize = 45;
 pub const inv_equip_start: usize = 55;
-pub const inv_equip_count: usize = 12;
-pub const max_inv_slots: usize = inv_equip_start + inv_equip_count; // 67
+/// V3.3.0 b18: `EquipmentSlots` gains `Backpack = 12`, so equipment is 13 wide
+/// (`Count`/`None` move 12 -> 13; changelog §5.1, protocol-packages.md §1.5.5).
+/// The trailing slot is the equipped backpack; the toolbelt stays 10 (stock
+/// play ships 10 slots, changelog §5.2).
+pub const inv_equip_count: usize = 13;
+pub const max_inv_slots: usize = inv_equip_start + inv_equip_count; // 68
 pub const inv_no_holding: u16 = 0xFFFF;
 
 // Layout invariants: bag contiguous after toolbelt; equip starts after bag.

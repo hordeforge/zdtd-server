@@ -50,7 +50,7 @@ drops its tests.
 ## 3. Keep the contract
 
 Every domain handler has the same signature and the same contract
-(`src/server/c2s/inv.zig:30`):
+(`src/server/c2s/inv.zig:29`):
 
 ```zig
 /// True when `name` belongs to this domain and was handled.
@@ -130,7 +130,7 @@ Four gates exist, all keyed on per-client state in `Client`
 | `takeDamageToken` | damage claims |
 
 A throttled package is not a hard failure: return `true` so the name stays
-claimed and increment `c2s_throttle` (`src/server/c2s/inv_txn.zig:56`):
+claimed and increment `c2s_throttle` (`src/server/c2s/inv_reload.zig:90`):
 
 ```zig
         if (!self.takeInvToken(c)) {

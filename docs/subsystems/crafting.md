@@ -49,11 +49,12 @@ so the wire list matches the catalog (`src/assets/recipes.zig:161-188`).
 
 ## The inventory craft path
 
-The C2S `InvTx` route dispatches op `craft` to `tryCraft` with the bag slot and count
-(`src/server/c2s/inv_txn.zig:128-129`, `src/server/game/craft.zig:381-384`). Only recipes with no
-workstation, tool or material requirement are accepted on this path, because the stock inventory
-never offers the others and accepting them would bypass the station gate or mint items from a
-zero-ingredient scrap stub (`src/server/game/craft.zig:401-409`):
+V3.3.0 b18 removed the per-operation `InvTx` craft route that dispatched op `craft` to
+`tryCraft`; backpack crafting now runs client-side and the server validates only the workstation
+queue (below). `tryCraft` survives as the station-independent helper with the same guards - only
+recipes with no workstation, tool or material requirement pass, because accepting the others would
+bypass the station gate or mint items from a zero-ingredient scrap stub
+(`src/server/game/craft.zig:401-409`):
 
 ```zig
 pub fn generalCraftAllowed(self: *const Game, recipe: assets_recipes.RecipeDef) bool {
@@ -124,8 +125,8 @@ pub fn tryScrap(self: *Game, peer_slot: usize, bag_slot: u16, qty: u16) bool {
 ```
 
 The ledger cause reuses `.craft`, because there is no scrap-specific cause
-(`src/server/game/craft.zig:567`). The C2S route reaches it through the same `InvTx` op table
-(`src/server/c2s/inv_txn.zig:130-131`).
+(`src/server/game/craft.zig:567`). The V3.2.0 `InvTx` op table that routed scrap C2S retired
+with the transaction packages; scrap now rides the same client-side push as craft.
 
 ## Loot rolls
 
@@ -190,15 +191,15 @@ chance that halves after every successful install, capped by the item's mod slot
 
 A filled bag reaches clients through `broadcastLootSpawn`, which picks the stock entity class by bag
 kind (`Backpack` for a death drop, `DroppedLootContainer` for a block spill) and sends the slots
-inside `NetPackageEntitySpawn` (`src/server/game/loot.zig:151-181`). A container's contents leave
-through `NetPackageInventoryDataResponse`, built after `ensureContainerLoot` has rolled the table
-(`src/server/c2s/inv_txn.zig:243-280`).
+inside `NetPackageEntitySpawn` (`src/server/game/loot.zig:151-181`). A container's contents leave through `NetPackageTileEntity`, built after
+`ensureContainerLoot` has rolled the table on the lock-open
+(`src/server/c2s/inv_te.zig`, `src/server/c2s/misc_lock.zig`).
 
 The workstation craft is a different trust boundary. The client queue blob is not trusted: when a
 stock recipes.xml is loaded, each queued output type is resolved to a name, looked up in the recipe
 table, checked against the station's `CraftingAreaRecipes`, rejected when material-based, checked
 against the unlock gate, and finally rewritten with the recipe's own output count and craft time
-(`src/server/c2s/inv_txn.zig:209-273`). The workstation tick then burns fuel, melts forge input and
+(`src/server/c2s/inv_te.zig:495-538`). The workstation tick then burns fuel, melts forge input and
 re-broadcasts only the stations it changed
 (`src/server/game/craft.zig:401-409`). The item ids and stack rules for those bodies are owned by
 the inventory and container pages; this page owns only what produced the stack. Container, bag and

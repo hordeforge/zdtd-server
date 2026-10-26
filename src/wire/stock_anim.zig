@@ -358,22 +358,25 @@ test "variable-length relay bodies report where the stock body ends" {
 /// length so a relay forwards exactly what stock writes.
 pub const ItemActionEffects = struct {
     entity_id: i32 = 0,
-    slot_idx: u8 = 0,
+    /// Stock `SByte` since b18 (§1.5.6); read as one byte bitcast to i8 so a
+    /// negative slot index round-trips (the enum pattern in stock_areas.zig).
+    slot_idx: i8 = 0,
     action_idx: u8 = 0,
     firing_state: u8 = 0,
     user_data: i32 = 0,
     wire_len: usize = 0,
 };
 
-/// NetPackageItemActionEffects::read (IL=39,
-/// il/netpackages-v3.2.0/NetPackageItemActionEffects_il.txt:33): entityId i32
-/// | slotIdx u8 | actionIdx u8 | firingState u8 | a bool that, when set, is
-/// followed by startPos and direction as Vector3 (write IL=52 sets it only
-/// when either vector is non-zero, so a false here means both are zero).
+/// NetPackageItemActionEffects::read (IL=39): entityId i32 | slotIdx SByte |
+/// actionIdx u8 | firingState u8 | a bool that, when set, is followed by
+/// startPos and direction as Vector3 (write IL=52 sets it only when either
+/// vector is non-zero, so a false here means both are zero). V3.3.0 b18 changed
+/// slotIdx Byte -> SByte (one byte either way; protocol-packages.md §1.5.6), so
+/// a negative index is representable.
 pub fn parseItemActionEffects(body: []const u8) binary.ReadError!ItemActionEffects {
     var r: binary.Reader = .{ .data = body };
     const eid = try r.readI32();
-    const slot = try r.readByte();
+    const slot: i8 = @bitCast(try r.readByte());
     const action = try r.readByte();
     const firing = try r.readByte();
     if (try r.readBool()) {

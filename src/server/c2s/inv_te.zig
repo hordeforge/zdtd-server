@@ -581,6 +581,45 @@ pub fn handleTe(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, 
         // duration / reset from the trigger's own UI. Tried last and gated on
         // the outer teBlockId resolving to a registered power block, so this
         // reader can never swallow a storage or workstation payload.
+        // TileEntityPowerSource ToServer fuel push (write IL=98 mode==1): a
+        // client added fuel to a generator; fold AddedFuel into the node's fuel
+        // (RE tile-entities-power.md §2.1). Gated on the block resolving to a
+        // capacity-backed generator so a non-power TE payload never reaches here.
+        if (stock_te.parsePowerSourceTeBody(body)) |ps| {
+            const bid: u16 = if (ps.block_id > 0 and ps.block_id <= 65535)
+                @intCast(ps.block_id)
+            else
+                return true;
+            const props = self.power_registry.lookup(bid) orelse return true;
+            // Gate on the node kind; `addFuelAt` itself fails closed on a
+            // capacity-backed cell (the registry `max_fuel` can read 0 offline
+            // while the node carries a real capacity from the block props).
+            if (props.kind != .generator) return true;
+            const sp = self.sim.playerByPeer(c.slot) orelse return true;
+            const spos = self.sim.transform[sp];
+            if (self.rejectIfBeyondEditRange(
+                c,
+                peer.local_id,
+                c.entity_id,
+                .container,
+                spos.x,
+                spos.y,
+                spos.z,
+                @floatFromInt(ps.world_x),
+                @floatFromInt(ps.world_y),
+                @floatFromInt(ps.world_z),
+            )) return true;
+            if (ps.added_fuel > 0) {
+                _ = self.sim.power.addFuelAt(
+                    ps.world_x,
+                    ps.world_y,
+                    ps.world_z,
+                    @floatFromInt(ps.added_fuel),
+                );
+                try replicate_te.broadcastPowerSourceTe(self, ps.world_x, ps.world_y, ps.world_z);
+            }
+            return true;
+        } else |_| {}
         if (stock_te.parsePoweredTriggerTeBody(body)) |trig| {
             const bid: u16 = if (trig.block_id > 0 and trig.block_id <= 65535)
                 @intCast(trig.block_id)

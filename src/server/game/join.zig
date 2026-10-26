@@ -502,7 +502,13 @@ pub fn sendDecoForStreamedChunk(self: *Game, c: *Client, peer: *ln_peer.Peer, cx
 }
 
 pub fn sendSignDataBatches(self: *Game, peer: *ln_peer.Peer) !void {
-    if (self.signs.entries.len == 0) {
+    // V3.3.0 b18: the download carries the prefab catalog AND every player
+    // library (signs.md §7), so the final `isLastBatch` belongs to whichever
+    // section still has entries after this one. A lone empty prefab set with no
+    // player signs still ships one empty last batch (worldInfoCo blocks on it).
+    const prefab_n = self.signs.entries.len;
+    const player_n = self.player_signs.liveCount();
+    if (prefab_n == 0 and player_n == 0) {
         const resp = try packages.buildSignDataResponseEmptyLast(self.body_buf[0..16]);
         try self.sendGameCritical(peer, "NetPackageSignDataResponse", resp);
         log.infoTagged("SignDataRequest -> empty last batch local_id={d}\n", .{peer.local_id});
@@ -510,16 +516,17 @@ pub fn sendSignDataBatches(self: *Game, peer: *ln_peer.Peer) !void {
     }
     var start: usize = 0;
     var batches: usize = 0;
-    while (start < self.signs.entries.len) {
+    while (start < prefab_n) {
         const last_chance = start;
-        // Probe how many fit, then send with correct is_last.
+        // Probe how many fit, then send with correct is_last: prefab is last
+        // only when no player sign follows it.
         const probe = try stock_sign.buildSignDataResponseBatch(
             &self.body_buf,
             self.signs.entries,
             start,
             false,
         );
-        const is_last = probe.next >= self.signs.entries.len;
+        const is_last = probe.next >= prefab_n and player_n == 0;
         const batch = try stock_sign.buildSignDataResponseBatch(
             &self.body_buf,
             self.signs.entries,
@@ -538,7 +545,28 @@ pub fn sendSignDataBatches(self: *Game, peer: *ln_peer.Peer) !void {
         }
         self.pollNetOnce();
     }
-    log.infoTagged("SignDataRequest -> batches={d} signs={d} local_id={d}\n", .{ batches, self.signs.entries.len, peer.local_id });
+    // Player-library signs: opaque blobs batched raw. The final batch carries
+    // is_last (or the prefab loop already did, when there were none).
+    if (player_n > 0) {
+        var entries: [64]stock_sign.RawSignEntry = undefined;
+        var cursor: usize = 0;
+        var pi: usize = 0;
+        while (pi < player_n and pi < entries.len) : (pi += 1) {
+            const e = self.player_signs.next(&cursor) orelse break;
+            entries[pi] = .{ .library_id = e.library(), .blob = e.blob[0..e.len] };
+        }
+        var start_p: usize = 0;
+        while (start_p < pi) {
+            const last_chance = start_p;
+            const probe = try stock_sign.buildSignDataResponseBatchRaw(&self.body_buf, entries[0..pi], start_p, false);
+            const is_last = probe.next >= pi;
+            const batch = try stock_sign.buildSignDataResponseBatchRaw(&self.body_buf, entries[0..pi], start_p, is_last);
+            if (is_last) try self.sendGameCritical(peer, "NetPackageSignDataResponse", batch.body) else try self.sendGame(peer, "NetPackageSignDataResponse", batch.body);
+            start_p = batch.next;
+            if (start_p == last_chance) break;
+        }
+    }
+    log.infoTagged("SignDataRequest -> batches={d} signs={d} player={d} local_id={d}\n", .{ batches, prefab_n, player_n, peer.local_id });
 }
 
 pub fn sendTraderSnapshot(self: *Game, peer: *ln_peer.Peer, prefer_slot: ?ecs.Slot) !void {

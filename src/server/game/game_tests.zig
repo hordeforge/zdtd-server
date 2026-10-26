@@ -6152,34 +6152,6 @@ test "starter_zombies gates the near-spawn demo hostiles" {
     try std.testing.expect(g_on.sim.countKind(.turret) > 0);
 }
 
-test "compact InvTx unknown op fails closed" {
-    // Compact InvTx is the loadgen/fixture fallback. Unknown ops past equip
-    // used to map to `.list` and ack success; they must reject instead.
-    var tmp = std.testing.tmpDir(.{});
-    defer tmp.cleanup();
-    const root = try test_tmp.rootOf(&tmp);
-    const g = try Game.createWithOptions(std.testing.allocator, root, 0, .{
-        .starter_zombies = false,
-        .demo_seed = false,
-    });
-    defer {
-        g.deinit();
-        std.testing.allocator.destroy(g);
-    }
-    var cap: ln_peer.Capture = .{};
-    const cl = try g.attachJoinedClient(&cap);
-    const rejects_before = g.harness.counters.get(.c2s_rejects);
-    var txb: [32]u8 = undefined;
-    var fb: [128]u8 = undefined;
-    const bad = try packages.buildInvTxRequest(&txb, 99, 0, 0, 0, -1);
-    cap.clear();
-    try g.injectFramed(cl, try packages.framed(&fb, "NetPackageInventoryTransactionRequest", bad));
-    try std.testing.expect(g.harness.counters.get(.c2s_rejects) > rejects_before);
-    const resp_id = packages.idOf("NetPackageInventoryTransactionResponse").?;
-    const resp = cap.findPkgId(resp_id) orelse return error.TestUnexpectedResult;
-    try std.testing.expectEqual(@as(u8, 0), resp[0]);
-}
-
 test "spawn_starter_kit config replaces the built-in kit and fails closed" {
     // `[sim] spawn_starter_kit` is server policy (ADR 0010): stock defines its
     // kit in code, so zdtd makes it config. A configured spec resolves names

@@ -57,7 +57,6 @@ pub const CounterId = enum(u16) {
     /// Stock InventoryTransaction.Write requests detected (the transactional
     /// mapping is the top remaining wire item; counted so real client
     /// container traffic is visible).
-    c2s_stock_invtx,
     /// C2S sign-text TE writes applied and echoed (stock TEFeatureSignable
     /// through NetPackageTileEntity).
     c2s_te_sign_echo,

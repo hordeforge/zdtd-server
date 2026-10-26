@@ -580,6 +580,7 @@ pub fn step(self: *Game) !void {
         if (save_interval_due) {
             self.containers.save(self.world.world_dir, self.allocator) catch |e| game_mod.logPersistErr(self, "save containers", e);
             self.sign_texts.save(self.world.world_dir, self.allocator) catch |e| game_mod.logPersistErr(self, "save sign texts", e);
+            self.player_signs.save(self.world.world_dir, self.allocator) catch |e| game_mod.logPersistErr(self, "save player signs", e);
             self.workstations.save(self.world.world_dir, self.allocator) catch |e| game_mod.logPersistErr(self, "save workstations", e);
             self.vending.save(self.world.world_dir) catch |e| game_mod.logPersistErr(self, "save vending", e);
             self.saveClaims() catch |e| game_mod.logPersistErr(self, "save claims", e);

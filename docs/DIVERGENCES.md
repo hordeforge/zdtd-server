@@ -762,10 +762,10 @@ the guard was verified by removing it and watching the test panic.
   waypoint and count packets. The item is still consumed by the client and
   lands through the inventory path, so a client that never pushes its
   inventory keeps the item in the server's copy.
-- **`NetPackageInventoryTransactionRequest`** accepts a compact form beside the
-  stock `InventoryTransaction.Write` op list. The stock layout is tried first
-  (`parseStockInvTx`), so a real client always takes the stock path; the compact
-  body exists for scenarios driving the same handler.
+- **`NetPackageInventoryTransactionRequest`** (retired in V3.3.0 b18 with the
+  transaction package) accepted a compact form beside the stock
+  `InventoryTransaction.Write` op list; both are gone, mutations ride the
+  `NetPackagePlayerInventory` blob.
 - **`NetPackageTurretSpawn`** accepts a compact 12-byte form of three i32 world
   coordinates beside the stock `entityType` i32 | pos Vector3 (3 x f32) | rot
   Vector3 | ItemValue | `entityThatPlaced` i32 (write IL=24). Until 2026-09-04

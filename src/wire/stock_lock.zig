@@ -1,5 +1,21 @@
-//! Lock bodies: request parse, grant/deny/force-unlock/trader/unlock
-//! responses, and the span-cap + grant-layout tests.
+//! Lock bodies for the V3.3.0 `NetPackageLockTarget` package (one package,
+//! both directions, opaque length-prefixed `LockManager` payload).
+//!
+//! The b10 `NetPackageLockRequest` / `NetPackageLockResponse` pair collapsed
+//! into one package whose body is `i32 payloadLen` + `payload bytes`
+//! (protocol-packages.md §1.5.1). Request and response carry distinct
+//! payloads; `LockManager` owns their layouts:
+//!
+//! request: `isLock bool` | `channel u16` | `targetCount i32` |
+//!          `targetCount x WorldAddress` (per-target `OnLockRequestLocal`
+//!          context is empty for every implementer, so none is written).
+//! response: `isLock bool` | `success bool` | `error string` | `channel u16` |
+//!          `targetCount i32` | `targetCount x WorldAddress`, then per-target
+//!          `OnLockResponseServer` context **only when success**.
+//!
+//! `WorldAddress` replaced `LockTargetType`/`ILockContext`: a `u8` tag
+//! (0 None, 1 TileEntity, 2 TEFeature, 3 Entity) precedes the fields, with no
+//! presence byte. The b10 `context_tail` (type name + `ILockContext`) is gone.
 //!
 //! Split out of the packages.zig facade (same builders, same tests);
 //! import via `packages.stock_lock` like the other stock_* leaves.
@@ -8,77 +24,89 @@ const std = @import("std");
 const binary = @import("binary.zig");
 const stock_entity = @import("stock_entity.zig");
 
-/// Stock NetPackageLockRequest body (after package id):
-/// locking:bool | channel:u16 | targetCount:i32 | targets… | contextType:string | context?
+/// `WorldAddress.WorldObjectType` tag (protocol-packages.md §1.5.1): the first
+/// byte of every target. `LockTargetType` and its `TransactionalInventory`
+/// member are gone; the tag now lives on `WorldAddress`.
+pub const WorldObjectType = enum(u8) {
+    none = 0,
+    tile_entity = 1,
+    te_feature = 2,
+    entity = 3,
+    _,
+};
+
+/// Parsed `NetPackageLockTarget` request payload (slices into `payload`).
 pub const LockRequestHead = struct {
-    locking: bool,
+    is_lock: bool,
     channel: u16,
-    /// Declared target span length. Stock's `LockRequestServer` gate 2
-    /// (IL=239) refuses more than `max_lock_targets_declared`, but the deny
-    /// response echoes the request's targets, so the parser walks the span and
-    /// the C2S handler owns the rule.
+    /// Declared target span length. `LockRequestServer` gate (IL_000E-0014)
+    /// accepts 1..5 and otherwise logs and drops; the parser walks the span so
+    /// the handler can enforce the rule (protocol-packages.md §1.5.1).
     target_count: i32,
-    /// True when any target entry is null (`WriteIdentifyingInfo` writes a
-    /// `false` presence byte and nothing else). Stock's gate 2 rejects a span
-    /// containing a null target with the same deny as an over-long span.
+    /// True when a target tag is `None` (0). `LockRequestServer` fails closed
+    /// on a null target (IL_00BE) with a deny, so the handler reports it.
     has_null_target: bool,
-    /// Slice of request body covering targetCount i32 + target identifying blobs (not context).
+    /// Slice of the request payload covering `targetCount i32` + the target
+    /// addresses (not the context, which is empty). Echoed verbatim by the
+    /// response's own target list.
     targets_blob: []const u8,
-    /// Remaining body after targets (context type string + optional payload).
+    /// Empty for every request (all `OnLockRequestLocal` are `ret`); kept so a
+    /// future context-bearing request has a place to land.
     context_tail: []const u8,
 };
 
-/// Walk one target's identifying info, returning false for a null target (the
-/// presence byte was 0).
-fn skipLockTargetIdent(r: *binary.Reader) binary.ReadError!bool {
-    const present = try r.readByte();
-    if (present == 0) return false;
-    const ty = try r.readByte();
-    switch (ty) {
-        0 => { // TileEntity → Vector3i
+/// Stock's hard cap on a lock request's target span (`LockRequestServer`
+/// IL_000E-0014: `count < 1 || count > 5` logs and drops). The b10 code
+/// replied with a deny; b18 drops with no reply, but the constant still names
+/// the limit the handler enforces.
+pub const max_lock_targets_declared: i32 = 5;
+
+/// Parse-time work bound on the declared target count, above the stock rule so
+/// the handler can enforce 1..5 rather than the parser rejecting early. A count
+/// past this bound is malformed rather than merely over-limit.
+const max_lock_targets_parseable: i32 = 64;
+
+/// Skip one `WorldAddress`, returning false when the tag is `None` (a null
+/// target). Used to walk a span without materialising it.
+fn skipWorldAddress(r: *binary.Reader) binary.ReadError!bool {
+    const tag: WorldObjectType = @enumFromInt(try r.readByte());
+    switch (tag) {
+        .none => return false,
+        .tile_entity => {
             _ = try r.readI32();
             _ = try r.readI32();
             _ = try r.readI32();
         },
-        1 => { // TEFeatureAbs → Vector3i + feature name
+        .te_feature => {
             _ = try r.readI32();
             _ = try r.readI32();
             _ = try r.readI32();
             try r.skipString();
         },
-        2 => { // Entity → entityId
-            _ = try r.readI32();
-        },
-        3 => { // TransactionalInventory → Guid
-            if (r.remaining() < 16) return error.EndOfStream;
-            r.pos += 16;
-        },
+        .entity => _ = try r.readI32(),
         else => return error.EndOfStream,
     }
     return true;
 }
 
-/// Stock's hard cap on a lock request's target span. `LockRequestServer` gate 2
-/// (IL=239, RE dedicated-leftovers.md:136) refuses a span longer than 5. The
-/// refusal still produces a reply: the failure sets `errorMsg` and falls
-/// through to the `NetPackageLockResponse` send with `success = false`
-/// (IL_0263), so the C2S handler owns this rule and must answer with a deny.
-/// The constant previously held 32 with a comment claiming the limit was
-/// undocumented, which accepted requests stock rejects.
-pub const max_lock_targets_declared: i32 = 5;
-
-/// Parse-time work bound on the declared target count, deliberately above the
-/// stock rule above: the parser has to walk the span even for a request the
-/// server will refuse, because the deny response echoes the request's targets.
-/// A count past this bound is malformed rather than merely over-limit.
-const max_lock_targets_parseable: i32 = 64;
-
-/// NetPackageLockRequest (RE write IL=74; the response in buildLockResponseGrant
-/// echoes these fields): `locking` bool | `channel` u16 | target count i32 |
-/// targets | `context` string. On success returns a head with slices into `body`.
-pub fn parseLockRequest(body: []const u8) binary.ReadError!LockRequestHead {
+/// Strip the `i32 payloadLen` framing from a `NetPackageLockTarget` package
+/// body, returning the payload slice (protocol-packages.md §1.5.1, write
+/// IL=15: `(i32)payload.Length` then the bytes). Fails closed when the
+/// declared length disagrees with the body, so a truncated or padded body
+/// never reaches `parseLockRequest`.
+pub fn unwrapLockTargetPayload(body: []const u8) binary.ReadError![]const u8 {
+    if (body.len < 4) return error.EndOfStream;
     var r: binary.Reader = .{ .data = body };
-    const locking = try r.readBool();
+    const len = try r.readI32();
+    if (len < 0 or @as(usize, @intCast(len)) != r.remaining()) return error.EndOfStream;
+    return body[4..];
+}
+
+/// Parse a `NetPackageLockTarget` request payload (the bytes after the
+/// `i32 payloadLen` framing). Returns a head with slices into `payload`.
+pub fn parseLockRequest(payload: []const u8) binary.ReadError!LockRequestHead {
+    var r: binary.Reader = .{ .data = payload };
+    const is_lock = try r.readBool();
     const channel = try r.readU16();
     const count_pos = r.pos;
     const count = try r.readI32();
@@ -86,348 +114,292 @@ pub fn parseLockRequest(body: []const u8) binary.ReadError!LockRequestHead {
     var has_null_target = false;
     var i: i32 = 0;
     while (i < count) : (i += 1) {
-        if (!try skipLockTargetIdent(&r)) has_null_target = true;
+        if (!try skipWorldAddress(&r)) has_null_target = true;
     }
     const targets_end = r.pos;
-    // remainder is context
+    // Remainder is the per-target context, empty for every request.
     return .{
-        .locking = locking,
+        .is_lock = is_lock,
         .channel = channel,
         .target_count = count,
         .has_null_target = has_null_target,
-        .targets_blob = body[count_pos..targets_end],
-        .context_tail = body[targets_end..],
+        .targets_blob = payload[count_pos..targets_end],
+        .context_tail = payload[targets_end..],
     };
 }
 
-/// NetPackageLockResponse granting the lock (RE inventories/netpackage-bodies.md,
-/// write IL=74): `locking` bool | `success` bool | `errorMsg` string |
-/// `isForceUnlocked` bool | `channel` u16 | `targets` | `context` string. The
-/// targets and context are echoed verbatim from the request, which is what
-/// keeps the client's pending lock correlated.
-pub fn buildLockResponseGrant(buf: []u8, req: LockRequestHead) ![]u8 {
-    return buildLockResponse(buf, req, true, "");
-}
-
-/// NetPackageLockResponse denying the lock, held by another peer or a busy
-/// channel (RE write IL=74; field order in buildLockResponseGrant).
-pub fn buildLockResponseDeny(buf: []u8, req: LockRequestHead, err_msg: []const u8) ![]u8 {
-    return buildLockResponse(buf, req, false, err_msg);
-}
-
-fn buildLockResponse(buf: []u8, req: LockRequestHead, success: bool, err_msg: []const u8) ![]u8 {
+/// Frame any LockTarget payload (request or response) into a package body:
+/// `i32 payloadLen` + payload bytes (protocol-packages.md §1.5.1, write IL=15).
+/// Callers (fixtures, handlers) build a payload with `binary.Writer`, then
+/// frame it here before `packages.framed(_, "NetPackageLockTarget", ...)`.
+pub fn frameLockTarget(buf: []u8, payload: []const u8) ![]u8 {
+    if (buf.len < payload.len + 4) return error.NoSpaceLeft;
     var w: binary.Writer = .{ .buf = buf };
-    try w.writeBool(req.locking);
+    try w.writeI32(@intCast(payload.len));
+    try w.writeBytes(payload);
+    return w.written();
+}
+
+/// Response payload prefix shared by every reply: `isLock` | `success` |
+/// `error string` | `channel u16` | `targetCount i32` + targets. `context`
+/// (per-target `OnLockResponseServer` bytes) is appended only when `success`
+/// (`LockRequestServer` IL_0200 skips the context loop on failure), so the
+/// caller passes `with_context`.
+fn buildLockResponsePayload(
+    buf: []u8,
+    req: LockRequestHead,
+    success: bool,
+    err_msg: []const u8,
+    context: []const u8,
+) ![]u8 {
+    var w: binary.Writer = .{ .buf = buf };
+    try w.writeBool(req.is_lock); // isLock echoed (true for a lock reply)
     try w.writeBool(success);
     try w.writeString(err_msg);
-    try w.writeBool(false); // isForceUnlocked
     try w.writeU16(req.channel);
+    // targets_blob starts with the targetCount i32, so echoing it reproduces
+    // `targetCount i32 | targets`, exactly the response's target span.
     try w.writeBytes(req.targets_blob);
-    if (req.context_tail.len > 0) {
-        try w.writeBytes(req.context_tail);
-    } else {
-        try w.writeString("");
-    }
+    if (success and context.len > 0) try w.writeBytes(context);
     return w.written();
 }
 
-/// NetPackageLockResponse forcing a held lock open (RE write IL=74; field order
-/// in `buildLockResponseGrant`). `locking = false` selects the client's
-/// `LockManager.UnlockResponse(success, errorMsg, isForceUnlocked)` branch
-/// (ProcessPackage IL=27), which reads neither the targets nor the context - so
-/// this needs only the channel, and the server does not have to have kept the
-/// original request's target blob. Stock sends the same thing from
-/// `ForceUnlockByPlayer` (IL=11) on disconnect cleanup and after a failed
-/// inventory transaction.
+/// Frame a `NetPackageLockTarget` grant: success with the caller's per-target
+/// context (trader `TraderData`, storage grid, or empty). The context is
+/// appended only on success per `LockRequestServer` IL_0200.
+pub fn buildLockResponseGrant(
+    buf: []u8,
+    req: LockRequestHead,
+    context: []const u8,
+) ![]u8 {
+    var payload_buf: [512]u8 = undefined;
+    const payload = try buildLockResponsePayload(&payload_buf, req, true, "", context);
+    return frameLockTarget(buf, payload);
+}
+
+/// Frame a `NetPackageLockTarget` deny: failure, `err_msg`, no context.
+pub fn buildLockResponseDeny(buf: []u8, req: LockRequestHead, err_msg: []const u8) ![]u8 {
+    var payload_buf: [512]u8 = undefined;
+    const payload = try buildLockResponsePayload(&payload_buf, req, false, err_msg, "");
+    return frameLockTarget(buf, payload);
+}
+
+/// Frame a `NetPackageLockTarget` force-unlock: `isLock = false` selects the
+/// client's `UnlockResponse` branch (ProcessPackage), which reads neither the
+/// targets nor a context. Stock sends this from `ForceUnlockByPlayer` on
+/// disconnect cleanup. It names the channel, so the head is synthesised.
 pub fn buildLockResponseForceUnlock(buf: []u8, channel: u16) ![]u8 {
-    var w: binary.Writer = .{ .buf = buf };
-    try w.writeBool(false); // locking = false -> UnlockResponse branch
-    try w.writeBool(true); // success
-    try w.writeString("");
-    try w.writeBool(true); // isForceUnlocked
-    try w.writeU16(channel);
-    try w.writeI32(0); // no targets: the unlock branch never reads them
-    try w.writeString("");
-    return w.written();
-}
-
-test "force-unlock lock response selects the unlock branch" {
-    // The two directions are different client calls (ProcessPackage IL=27), so
-    // `locking` is what routes it; a grant-shaped body with success=true would
-    // re-open the window instead of closing it.
-    var buf: [64]u8 = undefined;
-    const body = try buildLockResponseForceUnlock(&buf, 3);
-    var r: binary.Reader = .{ .data = body };
-    try std.testing.expectEqual(false, try r.readBool()); // locking
-    try std.testing.expectEqual(true, try r.readBool()); // success
-    var s: [8]u8 = undefined;
-    try std.testing.expectEqualStrings("", try r.readString(&s));
-    try std.testing.expectEqual(true, try r.readBool()); // isForceUnlocked
-    try std.testing.expectEqual(@as(u16, 3), try r.readU16());
-    try std.testing.expectEqual(@as(i32, 0), try r.readI32()); // target count
-    try std.testing.expectEqualStrings("", try r.readString(&s));
-    try std.testing.expectEqual(@as(usize, 0), r.remaining());
-}
-
-/// Grant a lock whose target is a trader. Stock serializes the target's lock
-/// context into the LockResponse, and the two trader-ish contexts do **not**
-/// share a layout:
-///   - `EntityTraderLockContext::Read` (EntityTrader_EntityTraderLockContext
-///     .il.txt:38): `Command` string, `hasTraderData` bool, then TraderData
-///     only when that bool is set.
-///   - `VendingMachineLockContext::Read` (TileEntityVendingMachine_Vending
-///     MachineLockContext.il.txt:19): TraderData **directly**, with no command
-///     and no bool.
-/// Emitting the entity shape for a vending machine hands the client two extra
-/// bytes (the empty command's length and the bool) which it reads as the first
-/// half of `TraderID`, desyncing the rest of the body.
-/// NetPackageTraderData is ToServer-only, so this is the packet that carries
-/// trader inventory to the opening client.
-pub fn buildLockResponseTrader(buf: []u8, req: LockRequestHead, td: stock_entity.TraderDataInfo) ![]u8 {
-    var w: binary.Writer = .{ .buf = buf };
-    // Type name + Command from the request context tail (empty-safe fallbacks).
-    // Separate buffers: the second readString must not clobber the first.
-    var type_buf: [64]u8 = undefined;
-    var cmd_buf: [64]u8 = undefined;
-    var r: binary.Reader = .{ .data = req.context_tail };
-    const type_name = if (req.context_tail.len > 0)
-        r.readString(&type_buf) catch "EntityTraderLockContext"
-    else
-        "EntityTraderLockContext";
-    const command = if (r.pos < req.context_tail.len)
-        (r.readString(&cmd_buf) catch "")
-    else
-        "";
-    try w.writeBool(req.locking);
+    var payload_buf: [64]u8 = undefined;
+    var w: binary.Writer = .{ .buf = &payload_buf };
+    try w.writeBool(false); // isLock = false -> UnlockResponse branch
     try w.writeBool(true); // success
     try w.writeString(""); // error
-    try w.writeBool(false); // isForceUnlocked
-    try w.writeU16(req.channel);
-    try w.writeBytes(req.targets_blob);
-    try w.writeString(type_name);
-    // VendingMachineLockContext has neither field; only the entity context
-    // carries Command + hasTraderData ahead of the TraderData.
-    if (!std.mem.eql(u8, type_name, vending_lock_context)) {
-        try w.writeString(command);
-        try w.writeBool(true); // hasTraderData
-    }
-    try stock_entity.writeTraderDataBody(&w, td);
-    return w.written();
+    try w.writeU16(channel);
+    try w.writeI32(0); // no targets: the unlock branch never reads them
+    return frameLockTarget(buf, w.written());
 }
 
-/// Stock type name for the vending-machine lock context, the discriminator the
-/// client uses to pick which context `Read` runs.
-pub const vending_lock_context = "VendingMachineLockContext";
-
-/// Unlock response (locking=false path on client ProcessPackage).
-/// NetPackageLockResponse for an unlock (RE write IL=74; field order in
-/// buildLockResponseGrant). locking=false with an empty target list.
+/// Frame a `NetPackageLockTarget` unlock reply (`isLock = false`, success or
+/// refusal). Same shape as force-unlock but `success` is the caller's verdict.
 pub fn buildLockResponseUnlock(buf: []u8, success: bool) ![]u8 {
-    var w: binary.Writer = .{ .buf = buf };
-    try w.writeBool(false); // locking
+    var payload_buf: [64]u8 = undefined;
+    var w: binary.Writer = .{ .buf = &payload_buf };
+    try w.writeBool(false); // isLock
     try w.writeBool(success);
     try w.writeString("");
-    try w.writeBool(false); // isForceUnlocked
-    // The tail is written even though an unlock carries nothing in it:
-    // omitting it would desync the reader's BinaryReader rather than save
-    // bytes. The RE body table lists nine fields, but the last two (target
-    // `FullName`, `ILockContext.Write`) sit behind the same two null guards as
-    // LockRequest (protocol-packages.md residual table): the per-target info
-    // is written only for a non-null target list, and the context payload only
-    // for a non-null context. An empty list and an empty context type name are
-    // therefore the complete stock encoding of "nothing locked".
-    try w.writeU16(0); // channel
-    try w.writeI32(0); // targets: empty list
-    try w.writeString(""); // context type name (empty = null context)
-    return w.written();
+    try w.writeU16(0); // channel (unlock branch ignores it)
+    try w.writeI32(0); // empty target list
+    return frameLockTarget(buf, w.written());
 }
 
-test "lock request span cap is the handler's rule, not the parser's" {
-    // Stock LockRequestServer gate 2 (IL=239) refuses a span longer than 5 and
-    // still replies with a deny that echoes the request's targets (IL_0263), so
-    // the parser must walk an over-limit span far enough for the C2S handler to
-    // answer it. Rejecting at parse time silently dropped the request, which
-    // left the client's pending lock unresolved.
-    const buildTargets = struct {
-        fn call(w: *binary.Writer, n: i32) !void {
-            try w.writeBool(true);
-            try w.writeU16(0);
-            try w.writeI32(n);
-            var i: i32 = 0;
-            while (i < n) : (i += 1) {
-                try w.writeByte(1); // present
-                try w.writeByte(1); // TEFeatureAbs
-                try w.writeI32(i);
-                try w.writeI32(70);
-                try w.writeI32(2);
-                try w.writeString("Storage");
-            }
-            try w.writeString("");
-        }
-    }.call;
-
-    // The literal 5 is the point of the test: deriving the bounds from the
-    // constant would pass for any value it happens to hold, which is exactly
-    // what let the old 32 sit here unnoticed.
-    try std.testing.expectEqual(@as(i32, 5), max_lock_targets_declared);
-
-    var over_buf: [1024]u8 = undefined;
-    var over_w: binary.Writer = .{ .buf = &over_buf };
-    try buildTargets(&over_w, 6);
-    const over = try parseLockRequest(over_w.written());
-    try std.testing.expectEqual(@as(i32, 6), over.target_count);
-    try std.testing.expect(!over.has_null_target);
-    // The whole span is walked, so the deny response can echo it. The blob
-    // starts after locking (1) + channel (2).
-    try std.testing.expectEqual(over_w.written().len, 3 + over.targets_blob.len + over.context_tail.len);
-
-    // A null target is gate 2's other reject; the parser reports it rather than
-    // pretending the span was well formed.
-    var null_buf: [64]u8 = undefined;
-    var null_w: binary.Writer = .{ .buf = &null_buf };
-    try null_w.writeBool(true);
-    try null_w.writeU16(0);
-    try null_w.writeI32(1);
-    try null_w.writeByte(0); // present = 0 -> null target
-    try null_w.writeString("");
-    const nul = try parseLockRequest(null_w.written());
-    try std.testing.expect(nul.has_null_target);
-
-    // Past the parse bound the body is malformed, not merely over-limit.
-    var huge_buf: [2048]u8 = undefined;
-    var huge_w: binary.Writer = .{ .buf = &huge_buf };
-    try buildTargets(&huge_w, max_lock_targets_parseable + 1);
-    try std.testing.expectError(error.EndOfStream, parseLockRequest(huge_w.written()));
+/// Frame a `NetPackageLockTarget` grant whose single target is a trader or
+/// vending machine, carrying that target's `OnLockResponseServer` context.
+/// `EntityTrader` writes `TraderData` on channel 1 (Trade) and nothing on
+/// channel 0; `TileEntityVendingMachine` always writes `TraderData`
+/// (EntityTrader.il.txt IL_005B-0082, TileEntityVendingMachine.il.txt
+/// IL_0000-0023). The caller decides which by passing the built context bytes.
+pub fn buildLockResponseTrader(
+    buf: []u8,
+    req: LockRequestHead,
+    td: stock_entity.TraderDataInfo,
+    write_trader_data: bool,
+) ![]u8 {
+    var ctx_buf: [512]u8 = undefined;
+    var ctx: []const u8 = &.{};
+    if (write_trader_data) {
+        var cw: binary.Writer = .{ .buf = &ctx_buf };
+        try stock_entity.writeTraderDataBody(&cw, td);
+        ctx = cw.written();
+    }
+    return buildLockResponseGrant(buf, req, ctx);
 }
 
-test "lock request grant response layout" {
-    // locking=true, channel=0, 1 TEFeatureAbs target at (1,70,2) name=Storage, empty context
-    var req: [64]u8 = undefined;
-    var w: binary.Writer = .{ .buf = &req };
+test "lock target request payload: tag-prefixed WorldAddress, no presence byte" {
+    // isLock=true, channel=1, one TEFeature target at (1,70,2) name=Storage.
+    var req_buf: [128]u8 = undefined;
+    var w: binary.Writer = .{ .buf = &req_buf };
     try w.writeBool(true);
-    try w.writeU16(0);
+    try w.writeU16(1);
     try w.writeI32(1);
-    try w.writeByte(1); // present
-    try w.writeByte(1); // TEFeatureAbs
+    try w.writeByte(2); // WorldObjectType.te_feature
     try w.writeI32(1);
     try w.writeI32(70);
     try w.writeI32(2);
     try w.writeString("Storage");
-    try w.writeString(""); // no context type
     const head = try parseLockRequest(w.written());
-    try std.testing.expect(head.locking);
-    try std.testing.expectEqual(@as(u16, 0), head.channel);
+    try std.testing.expect(head.is_lock);
+    try std.testing.expectEqual(@as(u16, 1), head.channel);
+    try std.testing.expectEqual(@as(i32, 1), head.target_count);
+    try std.testing.expect(!head.has_null_target);
+    // targets_blob starts with the targetCount i32 and covers the address span.
+    var tr: binary.Reader = .{ .data = head.targets_blob };
+    try std.testing.expectEqual(@as(i32, 1), try tr.readI32());
+    // WorldAddress: tag byte then fields (no presence byte ahead of it).
+    try std.testing.expectEqual(@as(u8, 2), try tr.readByte()); // te_feature tag
+    try std.testing.expectEqual(@as(i32, 1), try tr.readI32()); // x
+    try std.testing.expectEqual(@as(i32, 70), try tr.readI32()); // y
+    try std.testing.expectEqual(@as(i32, 2), try tr.readI32()); // z
+    var fbuf: [64]u8 = undefined;
+    try std.testing.expectEqualStrings("Storage", try tr.readString(&fbuf)); // feature
+    try std.testing.expectEqual(@as(usize, 0), tr.remaining());
 
-    var resp_buf: [128]u8 = undefined;
-    const resp = try buildLockResponseGrant(&resp_buf, head);
-    try std.testing.expectEqual(@as(u8, 1), resp[0]); // locking
-    try std.testing.expectEqual(@as(u8, 1), resp[1]); // success
+    // A `None` tag is a null target, reported rather than silently accepted.
+    var null_buf: [64]u8 = undefined;
+    var nw: binary.Writer = .{ .buf = &null_buf };
+    try nw.writeBool(true);
+    try nw.writeU16(0);
+    try nw.writeI32(1);
+    try nw.writeByte(0); // WorldObjectType.none
+    const nul = try parseLockRequest(nw.written());
+    try std.testing.expect(nul.has_null_target);
 
-    // Only those two bytes were checked. The rest is locking | success |
-    // errorMsg | isForceUnlocked | channel | targets | context, and the deny
-    // path had no test at all - it differs from grant only in the success bit
-    // and the message, which is exactly the pair a swap would hide.
-    var r: binary.Reader = .{ .data = resp };
-    var s_buf: [64]u8 = undefined;
-    try std.testing.expectEqual(true, try r.readBool()); // locking
-    try std.testing.expectEqual(true, try r.readBool()); // success
-    try std.testing.expectEqualStrings("", try r.readString(&s_buf)); // errorMsg
-    try std.testing.expectEqual(false, try r.readBool()); // isForceUnlocked
-    try std.testing.expectEqual(@as(u16, 0), try r.readU16()); // channel
-    // targets_blob is echoed verbatim: count 1 then the one target entry.
-    try std.testing.expectEqual(@as(i32, 1), try r.readI32());
-
-    var deny_buf: [128]u8 = undefined;
-    const deny = try buildLockResponseDeny(&deny_buf, head, "busy");
-    var dr: binary.Reader = .{ .data = deny };
-    try std.testing.expectEqual(true, try dr.readBool()); // locking echoed
-    try std.testing.expectEqual(false, try dr.readBool()); // success cleared
-    try std.testing.expectEqualStrings("busy", try dr.readString(&s_buf));
-    try std.testing.expectEqual(false, try dr.readBool()); // isForceUnlocked
-    try std.testing.expectEqual(@as(u16, 0), try dr.readU16()); // channel
+    // Past the parse bound the payload is malformed, not merely over-limit.
+    var huge_buf: [4096]u8 = undefined;
+    var hw: binary.Writer = .{ .buf = &huge_buf };
+    try hw.writeBool(true);
+    try hw.writeU16(0);
+    try hw.writeI32(max_lock_targets_parseable + 1);
+    var i: i32 = 0;
+    while (i < max_lock_targets_parseable + 1) : (i += 1) {
+        try hw.writeByte(1); // tile_entity
+        try hw.writeI32(i);
+        try hw.writeI32(0);
+        try hw.writeI32(0);
+    }
+    try std.testing.expectError(error.EndOfStream, parseLockRequest(hw.written()));
 }
 
-test "lock response for a trader carries the context and trader data" {
-    // buildLockResponseTrader had no test. It differs from a plain grant by
-    // forcing success true and appending the context type name, the command
-    // and a TraderData block, so the leading locking/success pair is where a
-    // swap would pass unnoticed.
-    var req_buf: [64]u8 = undefined;
+test "lock target grant frames an i32 payload length envelope" {
+    var req_buf: [128]u8 = undefined;
     var w: binary.Writer = .{ .buf = &req_buf };
-    try w.writeBool(true); // locking
-    try w.writeU16(3); // channel
-    try w.writeI32(0); // no targets
-    try w.writeString("EntityTraderLockContext");
-    try w.writeString("trade");
+    try w.writeBool(true);
+    try w.writeU16(0);
+    try w.writeI32(1);
+    try w.writeByte(2); // te_feature
+    try w.writeI32(1);
+    try w.writeI32(70);
+    try w.writeI32(2);
+    try w.writeString("Storage");
+    const head = try parseLockRequest(w.written());
+
+    var resp_buf: [256]u8 = undefined;
+    const resp = try buildLockResponseGrant(&resp_buf, head, "");
+    // Envelope: i32 payloadLen then payload.
+    var er: binary.Reader = .{ .data = resp };
+    const plen = try er.readI32();
+    try std.testing.expectEqual(@as(usize, @intCast(plen)), resp.len - 4);
+    // Payload: isLock | success | error | channel | targets…
+    try std.testing.expectEqual(true, try er.readBool()); // isLock
+    try std.testing.expectEqual(true, try er.readBool()); // success
+    var s_buf: [64]u8 = undefined;
+    try std.testing.expectEqualStrings("", try er.readString(&s_buf)); // error
+    try std.testing.expectEqual(@as(u16, 0), try er.readU16()); // channel
+    try std.testing.expectEqual(@as(i32, 1), try er.readI32()); // targetCount
+    try std.testing.expectEqual(@as(u8, 2), try er.readByte()); // te_feature tag
+    _ = try er.readI32(); // x
+    _ = try er.readI32(); // y
+    _ = try er.readI32(); // z
+    var ebuf: [64]u8 = undefined;
+    try std.testing.expectEqualStrings("Storage", try er.readString(&ebuf)); // feature
+    try std.testing.expectEqual(@as(usize, 0), er.remaining()); // no context (empty)
+
+    // Deny: same shape, success=false, no context, carries the error.
+    var deny_buf: [256]u8 = undefined;
+    const deny = try buildLockResponseDeny(&deny_buf, head, "locked");
+    var dr: binary.Reader = .{ .data = deny };
+    const dplen = try dr.readI32();
+    try std.testing.expectEqual(@as(usize, @intCast(dplen)), deny.len - 4);
+    try std.testing.expectEqual(true, try dr.readBool()); // isLock
+    try std.testing.expectEqual(false, try dr.readBool()); // success
+    try std.testing.expectEqualStrings("locked", try dr.readString(&s_buf));
+    try std.testing.expectEqual(@as(u16, 0), try dr.readU16());
+    try std.testing.expectEqual(@as(i32, 1), try dr.readI32());
+}
+
+test "force-unlock lock response selects the unlock branch" {
+    // isLock=false is what routes it client-side (ProcessPackage); a
+    // grant-shaped body with success=true would re-open the window instead.
+    var buf: [64]u8 = undefined;
+    const body = try buildLockResponseForceUnlock(&buf, 3);
+    var r: binary.Reader = .{ .data = body };
+    const plen = try r.readI32();
+    try std.testing.expectEqual(@as(usize, @intCast(plen)), body.len - 4);
+    try std.testing.expectEqual(false, try r.readBool()); // isLock
+    try std.testing.expectEqual(true, try r.readBool()); // success
+    var s: [8]u8 = undefined;
+    try std.testing.expectEqualStrings("", try r.readString(&s)); // error
+    try std.testing.expectEqual(@as(u16, 3), try r.readU16()); // channel
+    try std.testing.expectEqual(@as(i32, 0), try r.readI32()); // targetCount
+    try std.testing.expectEqual(@as(usize, 0), r.remaining());
+}
+
+test "trader grant carries TraderData context only when requested" {
+    var req_buf: [128]u8 = undefined;
+    var w: binary.Writer = .{ .buf = &req_buf };
+    try w.writeBool(true);
+    try w.writeU16(1); // Trade channel
+    try w.writeI32(1);
+    try w.writeByte(3); // entity
+    try w.writeI32(42);
     const head = try parseLockRequest(w.written());
 
     var resp_buf: [512]u8 = undefined;
     const resp = try buildLockResponseTrader(&resp_buf, head, .{
-        .trader_id = 42,
+        .trader_id = 7,
         .available_money = 1000,
         .entries = &.{},
-    });
+    }, true);
     var r: binary.Reader = .{ .data = resp };
+    const plen = try r.readI32();
+    try std.testing.expectEqual(true, try r.readBool()); // isLock
+    try std.testing.expectEqual(true, try r.readBool()); // success
     var s_buf: [64]u8 = undefined;
-    try std.testing.expectEqual(true, try r.readBool()); // locking echoed
-    try std.testing.expectEqual(true, try r.readBool()); // success forced
-    try std.testing.expectEqualStrings("", try r.readString(&s_buf)); // errorMsg
-    try std.testing.expectEqual(false, try r.readBool()); // isForceUnlocked
-    try std.testing.expectEqual(@as(u16, 3), try r.readU16()); // channel echoed
-    try std.testing.expectEqual(@as(i32, 0), try r.readI32()); // targets count
-    try std.testing.expectEqualStrings("EntityTraderLockContext", try r.readString(&s_buf));
-    try std.testing.expectEqualStrings("trade", try r.readString(&s_buf));
-    try std.testing.expectEqual(true, try r.readBool()); // hasTraderData
+    _ = try r.readString(&s_buf); // error
+    try std.testing.expectEqual(@as(u16, 1), try r.readU16()); // channel
+    try std.testing.expectEqual(@as(i32, 1), try r.readI32()); // targetCount
+    try std.testing.expectEqual(@as(u8, 3), try r.readByte()); // entity tag
+    try std.testing.expectEqual(@as(i32, 42), try r.readI32()); // entity id
+    // TraderData context follows the targets (channel 1 writes it).
+    try std.testing.expectEqual(@as(i32, 7), try r.readI32()); // TraderID
+    try std.testing.expectEqual(@as(usize, @intCast(plen)), resp.len - 4);
 
-    // With locking=true both leading bools are true, so a swap between the
-    // echoed locking and the forced success emits identical bytes. Repeat with
-    // locking=false: the pair is then observable, and success must still be
-    // forced true regardless.
-    var req2_buf: [64]u8 = undefined;
-    var w2: binary.Writer = .{ .buf = &req2_buf };
-    try w2.writeBool(false); // locking
-    try w2.writeU16(3);
-    try w2.writeI32(0);
-    try w2.writeString("EntityTraderLockContext");
-    try w2.writeString("trade");
-    const head2 = try parseLockRequest(w2.written());
+    // Without the context (channel 0 / Interaction writes none) the payload
+    // ends at the target.
     var resp2_buf: [512]u8 = undefined;
-    const resp2 = try buildLockResponseTrader(&resp2_buf, head2, .{
-        .trader_id = 42,
+    const resp2 = try buildLockResponseTrader(&resp2_buf, head, .{
+        .trader_id = 7,
         .available_money = 1000,
         .entries = &.{},
-    });
-    try std.testing.expectEqual(@as(u8, 0), resp2[0]); // locking echoed false
-    try std.testing.expectEqual(@as(u8, 1), resp2[1]); // success still forced
-
-    // Same builder, vending context: VendingMachineLockContext::Read takes the
-    // TraderData straight after the type name, with no Command and no
-    // hasTraderData bool (TileEntityVendingMachine_VendingMachineLockContext
-    // .il.txt:19). Emitting the entity shape here handed the client two extra
-    // bytes it reads as the first half of TraderID.
-    var vreq_buf: [64]u8 = undefined;
-    var vw: binary.Writer = .{ .buf = &vreq_buf };
-    try vw.writeBool(true);
-    try vw.writeU16(3);
-    try vw.writeI32(0);
-    try vw.writeString(vending_lock_context);
-    const vhead = try parseLockRequest(vw.written());
-    var vresp_buf: [512]u8 = undefined;
-    const vresp = try buildLockResponseTrader(&vresp_buf, vhead, .{
-        .trader_id = 42,
-        .available_money = 1000,
-        .entries = &.{},
-    });
-    var vr: binary.Reader = .{ .data = vresp };
-    _ = try vr.readBool(); // locking
-    _ = try vr.readBool(); // success
-    _ = try vr.readString(&s_buf); // errorMsg
-    _ = try vr.readBool(); // isForceUnlocked
-    _ = try vr.readU16(); // channel
-    _ = try vr.readI32(); // targets count
-    try std.testing.expectEqualStrings(vending_lock_context, try vr.readString(&s_buf));
-    // TraderData begins immediately: its TraderID, not a command length byte.
-    try std.testing.expectEqual(@as(i32, 42), try vr.readI32());
-    // The two contexts must not produce the same tail length for equal data.
-    try std.testing.expect(vresp.len < resp.len);
+    }, false);
+    var r2: binary.Reader = .{ .data = resp2 };
+    const plen2 = try r2.readI32();
+    _ = try r2.readBool();
+    _ = try r2.readBool();
+    _ = try r2.readString(&s_buf);
+    _ = try r2.readU16();
+    _ = try r2.readI32();
+    _ = try r2.readByte();
+    _ = try r2.readI32();
+    try std.testing.expectEqual(@as(usize, 0), r2.remaining());
+    try std.testing.expectEqual(@as(usize, @intCast(plen2)), resp2.len - 4);
 }
