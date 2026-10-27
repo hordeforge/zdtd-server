@@ -866,6 +866,11 @@ stock saves, so they do not apply. Spawn-selection/Burst are client UI.
   the shared prefix cannot misroute it. Parser round-trips + a scenario pin
   the push and the clamp.
 
+- **Live b18 headless gate 2026-10-26.** Safehouse container client (Xvfb,
+  Proton 11, wined3d) joins Navezgane and plays; demo cases pass. Fixed en
+  route: the missing b18 `toolbelt` S2C row (`config_files.zig:35`), the
+  PlayerId PDF v62 blob form and ECD sleeper block (`stock_playerid.zig:145`).
+
 Still open: GAP rows keep b10 scores (scorecard re-audit pending).
 
 ## Gates (evidence loop)

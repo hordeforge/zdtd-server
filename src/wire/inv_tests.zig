@@ -165,71 +165,12 @@ test "persistent player state fits a full claim list at max identity length" {
 // --- golden tests ---
 
 test "applyPlayerDataNetwork applies equipment after drag" {
-    var buf: [1024]u8 = undefined;
+    var buf: [4096]u8 = undefined;
     var w: binary.Writer = .{ .buf = &buf };
-    // ECD.write(networkWrite=false), entityClass 0 (no player mid fields)
-    try w.writeByte(36);
-    try w.writeI32(0);
-    try w.writeI32(106);
-    try w.writeF32(std.math.floatMax(f32));
-    try w.writeF32(-273);
-    try w.writeF32(61);
-    try w.writeF32(449);
-    try w.writeF32(0);
-    try w.writeF32(0);
-    try w.writeF32(0);
-    try w.writeBool(true);
-    try w.writeI32(4);
-    try w.writeI32(0);
-    try w.writeU32(0);
-    try w.writeBool(false);
-    try w.writeI16(0);
-    try w.writeBool(false);
-    try w.writeI32(-273);
-    try w.writeI32(61);
-    try w.writeI32(449);
-    try w.writeI16(-1);
-    try w.writeByte(0);
-    try w.writeU16(0);
-    try w.writeBool(false);
-    try w.writeF32(0); // stressAmount v36
-    // toolbelt: 1 stack (item 2) then pad to empty via list count=1 (rest empty on apply)
-    try w.writeU16(1);
-    try writeItemStack(&w, .{ .type_id = items_start_here + 2, .count = 3, .quality = 1 });
-    try w.writeByte(0); // selectedInventorySlot
-    // Bag v1 empty
-    try w.writeByte(1);
-    try w.writeU16(0);
-    try w.writeBool(false);
-    try w.writeBool(false);
-    try w.writeBool(false);
-    // dragAndDrop: 1 empty stack
-    try w.writeU16(1);
-    try w.writeU16(0);
-    // alreadyCrafted / spawn / meta head before equipment
-    try w.writeU16(0);
-    try w.writeByte(0);
-    try w.writeI64(0);
-    try w.writeBool(true);
-    try w.writeI16(0);
-    try w.writeBool(true); // bLoaded
-    try w.writeI32(-273);
-    try w.writeI32(61);
-    try w.writeI32(449);
-    try w.writeF32(0);
-    try w.writeI32(106);
-    try w.writeI32(0);
-    try w.writeI32(0);
-    try w.writeI32(0);
-    try w.writeI32(0);
-    // Equipment.Write v4: slot0 = item 8, rest empty
-    try w.writeByte(4);
-    try writeItemValue(&w, .{ .type_id = items_start_here + 8, .count = 1, .quality = 1 });
-    var ei: usize = 1;
-    while (ei < equipment_slots) : (ei += 1) try w.writeByte(0);
-    ei = 0;
-    while (ei < equipment_slots) : (ei += 1) try w.writeI32(0);
-    try w.writeI32(0);
+    // b18 C2S PlayerData: the ECD carries the network sleeper block and the
+    // three v62 blobs; the shared builder emits the same body the scenarios
+    // inject through the real handler.
+    try buildPlayerDataBodyForTest(&w, 106, 2, 8);
 
     var inv: components.Inventory = .{};
     const h = try applyPlayerDataNetwork(w.written(), &inv, null, null);
@@ -248,13 +189,6 @@ test "applyPlayerDataNetwork applies equipment after drag" {
     const before = unchanged;
     try std.testing.expectError(error.EndOfStream, applyPlayerDataNetwork(w.written()[0 .. w.written().len - 1], &unchanged, null, null));
     try std.testing.expectEqualDeep(before, unchanged);
-
-    // The shared test builder emits the same body this fixture writes by hand,
-    // so a scenario driving the real handler exercises this exact layout.
-    var hbuf: [1024]u8 = undefined;
-    var hw: binary.Writer = .{ .buf = &hbuf };
-    try buildPlayerDataBodyForTest(&hw, 106, 2, 8);
-    try std.testing.expectEqualSlices(u8, w.written(), hw.written());
 }
 
 test "empty item value is single zero byte" {

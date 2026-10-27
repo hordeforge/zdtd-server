@@ -142,8 +142,11 @@ pub fn writeEmptyPlayerDataFileNetwork(
     const pz: f32 = @floatFromInt(sz);
     const profile = opts.profile;
     const player_name = opts.player_name;
-    // --- EntityCreationData.write(bw, networkWrite=false) ---
-    // V3.1.0 ECD FileVersion=36. Use the player class matching the client's own
+    // --- EntityCreationData.write(bw, networkWrite=true) ---
+    // FileVersion 36: the b18 client still reads the 36 legacy branch
+    // (EntityCreationData.write stamps 38 for new writes; the >=37 tail is
+    // requestedBy+requestKey, which a join PDF does not carry). Use the
+    // player class matching the client's own
     // profile so GameManager.PlayerId with bLoaded=true can CreateEntity +
     // ToPlayer (applies bag/toolbelt) and the client adopts its real
     // appearance; the offline default stays playerMale.
@@ -189,26 +192,59 @@ pub fn writeEmptyPlayerDataFileNetwork(
     });
     try w.writeU16(0); // entityData length
     try w.writeBool(false); // no traderData
-    // networkWrite=false: skip sleeper/spawnBy/head/override fields
+    // Sleeper/spawnBy/head/dance block. Read gates it on a truthy mode
+    // (StreamModeRead.FromServer = 1; EntityCreationData::read IL_04FC), so
+    // the network path reads every field; a body that skips them shifts every
+    // later field and the client's stream dies inside the PDF blobs. Player
+    // entities carry all zeros/empties; isSleeper false drops the
+    // isSleeperPassive tail.
+    try w.writeByte(0); // sleeperPose
+    try w.writeBool(false); // isSleeper
+    try w.writeI32(0); // spawnById
+    try w.writeString(""); // spawnByName
+    try w.writeBool(false); // spawnByAllowShare
+    try w.writeByte(0); // headState
+    try w.writeF32(0); // overrideSize
+    try w.writeF32(0); // overrideHeadSize
+    try w.writeBool(false); // isDancing
     try w.writeF32(0); // stressAmount (ECD v36 tail)
 
-    // --- PlayerDataFile.Write remainder ---
-    // inventory (toolbelt) ItemStack list: pad to stock PUBLIC_SLOTS (10)
+    // --- PlayerDataFile.Write remainder (b18 v62: the three MemoryStream
+    // fields ship as `StreamUtils.WriteBlob` containers; the unsigned-max
+    // network version takes Read's `version >= 62` raw-blob branch, so a body
+    // still carrying the pre-b18 inline lists ends the stream inside the first
+    // ItemStack read: PlayerDataFile.Write IL=325 (WriteBlob IL_0014/IL_0020/
+    // IL_0145), PlayerDataFile.Read IL=657 (>=62 branch IL_0021)).
+    // inventoryData: Inventory.Write = u8 1 | ItemStackGrid | u8 selectedSlot
+    // (Inventory.Write IL=14; the selected slot moved inside the blob).
     var tb_pad: [stock_inv.toolbelt_slots]stock_inv.StockSlot = @splat(.{});
     {
         const n = @min(toolbelt.len, tb_pad.len);
         @memcpy(tb_pad[0..n], toolbelt[0..n]);
     }
-    try stock_inv.writeItemStackList(w, tb_pad[0..]);
-    try w.writeByte(0); // selectedInventorySlot
-    // Bag: pad to stock CarryCapacity base (45). Mismatched counts resize the
-    // client bag via Bag.ReadInto and leave every slot occupied (AddItem fails).
+    {
+        var blob: [1024]u8 = undefined;
+        var bw: binary.Writer = .{ .buf = &blob };
+        try bw.writeByte(1); // Inventory.Write version
+        try stock_inv.writeItemStackGrid(&bw, tb_pad[0..]);
+        try bw.writeByte(0); // selectedInventorySlot (server tracks none)
+        try stock_inv.writeBlob(w, bw.written());
+    }
+    // bagData: Bag.Write = u8 2 | ItemStackGrid. Pad to stock CarryCapacity
+    // base (45). Mismatched counts resize the client bag via Bag.ReadInto and
+    // leave every slot occupied (AddItem fails).
     var bag_pad: [stock_inv.bag_slots]stock_inv.StockSlot = @splat(.{});
     {
         const n = @min(bag.len, bag_pad.len);
         @memcpy(bag_pad[0..n], bag[0..n]);
     }
-    try stock_inv.writeBag(w, bag_pad[0..], true);
+    {
+        var blob: [2048]u8 = undefined;
+        var bw: binary.Writer = .{ .buf = &blob };
+        try bw.writeByte(2); // Bag.Write version
+        try stock_inv.writeItemStackGrid(&bw, bag_pad[0..]);
+        try stock_inv.writeBlob(w, bw.written());
+    }
     // dragAndDropItem as 1-element empty stack list
     try w.writeU16(1);
     try w.writeU16(0); // ItemStack.count == 0 (no ItemValue)
@@ -230,13 +266,20 @@ pub fn writeEmptyPlayerDataFileNetwork(
     try w.writeI32(opts.zombie_kills);
     try w.writeI32(opts.deaths);
     try w.writeI32(opts.score);
-    // Equipment.Write: version 4, 12 empty ItemValues, 12 cosmetic i32 zeros, unlocked 0
-    try w.writeByte(4);
-    var i: usize = 0;
-    while (i < 12) : (i += 1) try w.writeByte(0); // null/empty ItemValue
-    i = 0;
-    while (i < 12) : (i += 1) try w.writeI32(0); // cosmetic slot ids
-    try w.writeI32(0); // unlocked cosmetics count
+    // equipmentData (WriteBlob IL_0145, after score): Equipment.Write = u8 6
+    // | ItemStackGrid | one cosmetic i32 per equipment slot (13, stock_inv:41)
+    // | unlocked cosmetic count. Empty slots; the PDF carries no gear.
+    {
+        var blob: [1024]u8 = undefined;
+        var bw: binary.Writer = .{ .buf = &blob };
+        try bw.writeByte(6); // Equipment.Write version
+        var eq_pad: [stock_inv.equipment_slots]stock_inv.StockSlot = @splat(.{});
+        try stock_inv.writeItemStackGrid(&bw, eq_pad[0..]);
+        var ci: usize = 0;
+        while (ci < stock_inv.equipment_slots) : (ci += 1) try bw.writeI32(0); // cosmetic slot ids
+        try bw.writeI32(0); // unlocked cosmetics count
+        try stock_inv.writeBlob(w, bw.written());
+    }
     // unlockedRecipeList: u16 count + 7DTD strings (always_unlocked craft names)
     const unlock_n: u16 = @intCast(@min(unlocked_recipes.len, 512));
     try w.writeU16(unlock_n);

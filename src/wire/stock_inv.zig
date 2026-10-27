@@ -591,7 +591,18 @@ pub fn skipEcdNetworkWriteFalse(r: *binary.Reader) binary.ReadError!struct { ent
     r.pos += ed_len;
     const has_trader = try r.readBool();
     if (has_trader) return error.EndOfStream; // rare on join PDF
-    // networkWrite=false: no sleeper tail; junkDrone skipped (class 0)
+    // Sleeper/spawnBy/head/dance block: present on the network path (read
+    // gates on a truthy StreamModeRead, EntityCreationData::read IL_04FC).
+    _ = try r.readByte(); // sleeperPose
+    const is_sleeper = try r.readBool();
+    _ = try r.readI32(); // spawnById
+    try r.skipString(); // spawnByName
+    _ = try r.readBool(); // spawnByAllowShare
+    _ = try r.readByte(); // headState
+    _ = try r.readF32(); // overrideSize
+    _ = try r.readF32(); // overrideHeadSize
+    _ = try r.readBool(); // isDancing
+    if (is_sleeper) _ = try r.readBool(); // isSleeperPassive
     if (file_ver >= 36) _ = try r.readF32(); // stressAmount
     return .{ .entity_id = entity_id, .x = x, .y = y, .z = z };
 }
@@ -611,21 +622,33 @@ pub fn applyPlayerDataNetwork(
     var r: binary.Reader = .{ .data = body };
     const head = try skipEcdNetworkWriteFalse(&r);
     var next = inv.*;
+    var scratch: [8192]u8 = undefined;
 
-    // PDF.Write remainder starts with toolbelt ItemStack list
+    // b18 v62 PDF: inventoryData blob = Inventory.Write = u8 1 | ItemStackGrid
+    // | u8 selectedSlot (the selected slot moved inside the blob; a body that
+    // still carries the pre-b18 inline list ends the stream in the drag read).
+    const inv_n = try readBlob(&r, &scratch);
+    var ir: binary.Reader = .{ .data = scratch[0..inv_n] };
+    if (try ir.readByte() != 1) return error.EndOfStream;
     var tb: [toolbelt_slots]StockSlot = @splat(.{});
-    const tb_n = try readItemStackList(&r, tb[0..]);
+    _ = try readItemStackGrid(&ir, tb[0..]);
     var i: usize = 0;
-    while (i < toolbelt_slots) : (i += 1) {
-        next.slots[i] = if (i < tb_n) toEcs(tb[i], reverse, ctx) else .{};
-    }
-    const selected = try r.readByte(); // selectedInventorySlot
+    while (i < toolbelt_slots) : (i += 1) next.slots[i] = toEcs(tb[i], reverse, ctx);
+    const selected = try ir.readByte(); // selectedInventorySlot
     if (selected < toolbelt_slots) {
         _ = next.setHolding(selected);
     }
 
-    // Bag (always written in PDF)
-    try skipBagApply(&r, &next, reverse, ctx);
+    // bagData blob = Bag.Write = u8 2 | ItemStackGrid
+    const bag_n = try readBlob(&r, &scratch);
+    var br: binary.Reader = .{ .data = scratch[0..bag_n] };
+    if (try br.readByte() != 2) return error.EndOfStream;
+    var bs: [bag_slots]StockSlot = @splat(.{});
+    _ = try readItemStackGrid(&br, bs[0..]);
+    i = 0;
+    while (i < bag_slots) : (i += 1) {
+        next.slots[components.inv_bag_start + i] = toEcs(bs[i], reverse, ctx);
+    }
 
     // dragAndDrop as 1-element list
     var drag: [1]StockSlot = .{.{}};
@@ -653,8 +676,25 @@ pub fn applyPlayerDataNetwork(
     _ = try r.readI32(); // deaths
     _ = try r.readI32(); // score
 
-    // Equipment.Write (v4): 12 ItemValues + 12 cosmetic i32 + unlocked list
-    try applyEquipmentWrite(&r, &next, reverse, ctx);
+    // equipmentData blob = Equipment.Write = u8 6 | ItemStackGrid | cosmetic
+    // i32 per slot | unlocked count + ids
+    const eq_n = try readBlob(&r, &scratch);
+    var er: binary.Reader = .{ .data = scratch[0..eq_n] };
+    if (try er.readByte() != 6) return error.EndOfStream;
+    var eq: [equipment_slots]StockSlot = @splat(.{});
+    const eq_len = try readItemStackGrid(&er, eq[0..]);
+    i = 0;
+    while (i < eq_len) : (i += 1) {
+        if (i < components.inv_equip_count) {
+            next.slots[components.inv_equip_start + i] = toEcs(eq[i], reverse, ctx);
+        }
+    }
+    i = 0;
+    while (i < eq_len) : (i += 1) _ = try er.readI32(); // cosmetic slot ids
+    const unlocked = try er.readI32();
+    if (unlocked < 0) return error.EndOfStream;
+    var ui: i32 = 0;
+    while (ui < unlocked) : (ui += 1) _ = try er.readI32();
 
     var filled: u16 = 0;
     i = 0;
@@ -663,30 +703,6 @@ pub fn applyPlayerDataNetwork(
     }
     inv.* = next;
     return .{ .entity_id = head.entity_id, .x = head.x, .y = head.y, .z = head.z, .inv_slots = filled };
-}
-
-/// Equipment.Write / Read: version byte 4, m_slots ItemValues, cosmetic i32s, unlocked i32 list.
-fn applyEquipmentWrite(
-    r: *binary.Reader,
-    inv: *components.Inventory,
-    reverse: ?ReverseResolver,
-    ctx: ?*anyopaque,
-) binary.ReadError!void {
-    const ver = try r.readByte();
-    if (ver != 4) return error.EndOfStream;
-    var i: usize = 0;
-    while (i < equipment_slots) : (i += 1) {
-        const s = try readItemValue(r);
-        if (i < components.inv_equip_count) {
-            inv.slots[components.inv_equip_start + i] = toEcs(s, reverse, ctx);
-        }
-    }
-    i = 0;
-    while (i < equipment_slots) : (i += 1) _ = try r.readI32(); // cosmetic slot ids
-    const unlocked = try r.readI32();
-    if (unlocked < 0) return error.EndOfStream;
-    var ui: i32 = 0;
-    while (ui < unlocked) : (ui += 1) _ = try r.readI32();
 }
 
 /// Parse a Bag blob; apply stacks into `inv` when non-null, skip otherwise.
@@ -1376,17 +1392,40 @@ pub fn buildPlayerDataBodyForTest(
     try w.writeI32(449);
     try w.writeI16(-1);
     try w.writeByte(0);
-    try w.writeU16(0);
-    try w.writeBool(false);
+    try w.writeU16(0); // entityData
+    try w.writeBool(false); // no traderData
+    // Sleeper/spawnBy/head/dance block (network read consumes it;
+    // EntityCreationData::read IL_04FC).
+    try w.writeByte(0); // sleeperPose
+    try w.writeBool(false); // isSleeper
+    try w.writeI32(0); // spawnById
+    try w.writeString(""); // spawnByName
+    try w.writeBool(false); // spawnByAllowShare
+    try w.writeByte(0); // headState
+    try w.writeF32(0); // overrideSize
+    try w.writeF32(0); // overrideHeadSize
+    try w.writeBool(false); // isDancing
     try w.writeF32(0); // stressAmount v36
-    try w.writeU16(1);
-    try writeItemStack(w, .{ .type_id = items_start_here + toolbelt_item, .count = 3, .quality = 1 });
-    try w.writeByte(0); // selectedInventorySlot
-    try w.writeByte(1); // Bag v1
-    try w.writeU16(0);
-    try w.writeBool(false);
-    try w.writeBool(false);
-    try w.writeBool(false);
+    // inventoryData blob: u8 1 | ItemStackGrid(10, slot0 stack) | u8 selected
+    {
+        var blob: [512]u8 = undefined;
+        var bw: binary.Writer = .{ .buf = &blob };
+        try bw.writeByte(1); // Inventory.Write version
+        var tb_slots: [toolbelt_slots]StockSlot = @splat(.{});
+        tb_slots[0] = .{ .type_id = items_start_here + toolbelt_item, .count = 3, .quality = 1 };
+        try writeItemStackGrid(&bw, tb_slots[0..]);
+        try bw.writeByte(0); // selectedInventorySlot
+        try writeBlob(w, bw.written());
+    }
+    // bagData blob: u8 2 | ItemStackGrid(45 empty)
+    {
+        var blob: [512]u8 = undefined;
+        var bw: binary.Writer = .{ .buf = &blob };
+        try bw.writeByte(2); // Bag.Write version
+        var bag_slots_empty: [bag_slots]StockSlot = @splat(.{});
+        try writeItemStackGrid(&bw, bag_slots_empty[0..]);
+        try writeBlob(w, bw.written());
+    }
     try w.writeU16(1); // dragAndDrop: one empty stack
     try w.writeU16(0);
     try w.writeU16(0); // alreadyCrafted
@@ -1404,11 +1443,17 @@ pub fn buildPlayerDataBodyForTest(
     try w.writeI32(0);
     try w.writeI32(0);
     try w.writeI32(0);
-    try w.writeByte(4); // Equipment v4
-    try writeItemValue(w, .{ .type_id = items_start_here + equip_item, .count = 1, .quality = 1 });
-    var ei: usize = 1;
-    while (ei < equipment_slots) : (ei += 1) try w.writeByte(0);
-    ei = 0;
-    while (ei < equipment_slots) : (ei += 1) try w.writeI32(0);
-    try w.writeI32(0);
+    // equipmentData blob: u8 6 | ItemStackGrid(13, slot0 stack) | cosmetics | unlocked
+    {
+        var blob: [1024]u8 = undefined;
+        var bw: binary.Writer = .{ .buf = &blob };
+        try bw.writeByte(6); // Equipment.Write version
+        var eq_slots: [equipment_slots]StockSlot = @splat(.{});
+        eq_slots[0] = .{ .type_id = items_start_here + equip_item, .count = 1, .quality = 1 };
+        try writeItemStackGrid(&bw, eq_slots[0..]);
+        var ci: usize = 0;
+        while (ci < equipment_slots) : (ci += 1) try bw.writeI32(0); // cosmetic ids
+        try bw.writeI32(0); // unlocked count
+        try writeBlob(w, bw.written());
+    }
 }

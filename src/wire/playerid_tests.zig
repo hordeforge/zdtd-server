@@ -267,40 +267,38 @@ test "player id PDF bag is CarryCapacity empties" {
     _ = try r.readI16(); // team
     // Skip ECD via stock_inv helper (player branch + v36 stress).
     _ = try stock_inv.skipEcdNetworkWriteFalse(&r);
-    const tb_n = try r.readU16();
-    try std.testing.expectEqual(@as(u16, @intCast(stock_inv.toolbelt_slots)), tb_n);
-    var i: usize = 0;
-    while (i < tb_n) : (i += 1) {
-        const c = try r.readU16();
-        try std.testing.expectEqual(@as(u16, 0), c);
-    }
-    _ = try r.readByte(); // selected
-    try std.testing.expectEqual(@as(u8, 1), try r.readByte()); // bag ver
-    const bag_n = try r.readU16();
-    try std.testing.expectEqual(@as(u16, @intCast(stock_inv.bag_slots)), bag_n);
-    var nonempty: usize = 0;
-    i = 0;
-    while (i < bag_n) : (i += 1) {
-        const c = try r.readU16();
-        if (c != 0) {
-            nonempty += 1;
-            // skip ItemValue v9 minimal
-            try std.testing.expectEqual(@as(u8, 9), try r.readByte());
-            _ = try r.readByte(); // flags
-            _ = try r.readU16(); // type
-            _ = try r.readF32();
-            _ = try r.readU16();
-            _ = try r.readU16();
-            _ = try r.readByte(); // meta count
-            _ = try r.readByte();
-            _ = try r.readByte(); // mods
-            _ = try r.readByte();
-            _ = try r.readByte();
-            _ = try r.readU16();
-            _ = try r.readBool();
-        }
-    }
-    try std.testing.expectEqual(@as(usize, 4), nonempty);
+    // inventoryData blob (b18 v62): u8 1 | ItemStackGrid | u8 selectedSlot
+    var scratch: [8192]u8 = undefined;
+    const inv_n = try stock_inv.readBlob(&r, &scratch);
+    var ir: binary.Reader = .{ .data = scratch[0..inv_n] };
+    try std.testing.expectEqual(@as(u8, 1), try ir.readByte()); // Inventory.Write version
+    var tb: [stock_inv.toolbelt_slots]stock_inv.StockSlot = undefined;
+    try std.testing.expectEqual(
+        @as(usize, stock_inv.toolbelt_slots),
+        try stock_inv.readItemStackGrid(&ir, &tb),
+    );
+    for (tb) |s| try std.testing.expectEqual(@as(u16, 0), s.type_id);
+    try std.testing.expectEqual(@as(u8, 0), try ir.readByte()); // selected slot
+    try std.testing.expectEqual(@as(usize, 0), ir.remaining());
+    // bagData blob: u8 2 | ItemStackGrid
+    const bag_n = try stock_inv.readBlob(&r, &scratch);
+    var br: binary.Reader = .{ .data = scratch[0..bag_n] };
+    try std.testing.expectEqual(@as(u8, 2), try br.readByte()); // Bag.Write version
+    var bs: [stock_inv.bag_slots]stock_inv.StockSlot = undefined;
+    try std.testing.expectEqual(
+        @as(usize, stock_inv.bag_slots),
+        try stock_inv.readItemStackGrid(&br, &bs),
+    );
+    try std.testing.expectEqual(@as(usize, 0), br.remaining());
+    try std.testing.expectEqual(bag[0].type_id, bs[0].type_id);
+    try std.testing.expectEqual(bag[0].count, bs[0].count);
+    try std.testing.expectEqual(bag[3].type_id, bs[3].type_id);
+    try std.testing.expectEqual(@as(u16, 0), bs[4].type_id); // padded empty
+    // drag list + alreadyCrafted + spawnPoints byte stay inline after the blobs.
+    try std.testing.expectEqual(@as(u16, 1), try r.readU16());
+    try std.testing.expectEqual(@as(u16, 0), try r.readU16()); // empty drag stack
+    try std.testing.expectEqual(@as(u16, 0), try r.readU16()); // alreadyCrafted
+    try std.testing.expectEqual(@as(u8, 0), try r.readByte()); // spawnPoints count
 }
 
 test "ConfirmSpawnEntity golden layout: i64 id + 16-byte request key (V3.2.0)" {
