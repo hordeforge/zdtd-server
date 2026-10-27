@@ -27,19 +27,21 @@ const assets_localization = @import("../../assets/localization.zig");
 /// start rather than silently truncating what the client `Read`s (PRD R12).
 pub const max_config_blob_len: usize = 384 * 1024;
 
-/// 42 of the stock `xmlsToLoad` rows (49 total per
+/// 43 of the stock `xmlsToLoad` rows (50 total per
 /// `../7dtd-engine-research/docs/inventories/xmlsToLoad.md`: the
-/// `SendToClients`-flagged set plus the clientFile/XUi rows). `archetypes` is
-/// `LoadClientFile` (name-only, RE §5.6). Never sent: rwgmixer, gamestages,
-/// spawning, signs, loadingscreen, subtitles, videos.
+/// `SendToClients`-flagged set plus the clientFile/XUi rows; `toolbelt` is the
+/// V3.3.0 addition). `archetypes` is `LoadClientFile` (name-only, RE §5.6).
+/// Never sent: rwgmixer, gamestages, spawning, signs, loadingscreen, subtitles,
+/// videos.
 const s2c_names = [_][]const u8{
-    "events",               "materials",          "physicsbodies",   "painting",          "shapes",               "blocks",
-    "progression",          "buffs",              "misc",            "items",             "item_modifiers",       "entityclasses",
-    "qualityinfo",          "sounds",             "recipes",         "blockplaceholders", "loot",                 "entitygroups",
-    "utilityai",            "vehicles",           "weathersurvival", "archetypes",        "challenges",           "quests",
-    "traders",              "npc",                "dialogs",         "ui_display",        "nav_objects",          "gameevents",
-    "twitch",               "twitch_events",      "dmscontent",      "XUi_Common/styles", "XUi_Common/templates", "XUi_InGame/styles",
-    "XUi_InGame/templates", "XUi_InGame/windows", "XUi_InGame/xui",  "biomes",            "worldglobal",          "sandbox_overrides",
+    "events",            "materials",            "physicsbodies",      "painting",        "shapes",            "blocks",
+    "progression",       "buffs",                "misc",               "toolbelt",        "items",             "item_modifiers",
+    "entityclasses",     "qualityinfo",          "sounds",             "recipes",         "blockplaceholders", "loot",
+    "entitygroups",      "utilityai",            "vehicles",           "weathersurvival", "archetypes",        "challenges",
+    "quests",            "traders",              "npc",                "dialogs",         "ui_display",        "nav_objects",
+    "gameevents",        "twitch",               "twitch_events",      "dmscontent",      "XUi_Common/styles", "XUi_Common/templates",
+    "XUi_InGame/styles", "XUi_InGame/templates", "XUi_InGame/windows", "XUi_InGame/xui",  "biomes",            "worldglobal",
+    "sandbox_overrides",
 };
 
 /// NetPackageIdMapping row name for the item id space (stock `ldstr items`,
@@ -245,7 +247,7 @@ pub fn finishLocalization(self: *Game, c: *Client) void {
 pub fn sendLocalConfigFiles(self: *Game, peer: *ln_peer.Peer) !void {
     for (s2c_names, 0..) |name, idx| {
         const blob = self.config_cache.rows[idx].data;
-        // All 42 names are < 128 chars, so the 7-bit length is one byte.
+        // All 43 names are < 128 chars, so the 7-bit length is one byte.
         comptime {
             var longest: usize = 0;
             for (s2c_names) |n| longest = @max(longest, n.len);
@@ -407,4 +409,26 @@ test "deflateBlob rejects a blob past the cap instead of shipping it" {
     var prng = std.Random.DefaultPrng.init(0x7d7d);
     prng.random().bytes(noise);
     try std.testing.expectError(error.ConfigBlobTooLarge, deflateBlob(gpa, noise));
+}
+
+test "s2c_names matches the stock V3.3.0 SendToClients table order" {
+    // Stock walks xmlsToLoad in ctor order and ships every SendToClients row
+    // (SendXmlsToClient IL=41, RE mod-loading.md §5.6); the client's
+    // WorldStaticData load gates worldInfoCo on that set arriving. The set
+    // and order come from the cctor table (RE inventories/xmlsToLoad.md, V3.3.0:
+    // 50 rows, S2C = 43, toolbelt row new in 3.3.0 with Data/Config/toolbelt.xml).
+    const stock_s2c = [_][]const u8{
+        "events",            "materials",            "physicsbodies",      "painting",        "shapes",            "blocks",
+        "progression",       "buffs",                "misc",               "toolbelt",        "items",             "item_modifiers",
+        "entityclasses",     "qualityinfo",          "sounds",             "recipes",         "blockplaceholders", "loot",
+        "entitygroups",      "utilityai",            "vehicles",           "weathersurvival", "archetypes",        "challenges",
+        "quests",            "traders",              "npc",                "dialogs",         "ui_display",        "nav_objects",
+        "gameevents",        "twitch",               "twitch_events",      "dmscontent",      "XUi_Common/styles", "XUi_Common/templates",
+        "XUi_InGame/styles", "XUi_InGame/templates", "XUi_InGame/windows", "XUi_InGame/xui",  "biomes",            "worldglobal",
+        "sandbox_overrides",
+    };
+    try std.testing.expectEqualStrings(
+        std.mem.sliceAsBytes(&stock_s2c),
+        std.mem.sliceAsBytes(&s2c_names),
+    );
 }
