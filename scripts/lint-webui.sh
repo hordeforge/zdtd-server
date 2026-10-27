@@ -145,10 +145,14 @@ presets="$cache_dir/node_modules/@rikalabs/oxlint-standards/presets"
 # Probe with a minimal config beside the cache: oxlint reads the nearest
 # .oxlintrc.jsonc when none is given, which for a run inside the repo root is
 # the committed one, and that extends ./strict-resolved.json, the flattener
-# output not yet written. Without the probe config, `--rules` dies on the
-# not-yet-flattened chain.
+# output not yet written. A plugin-less --config does not stop that upward
+# lookup either, so the probe runs from an empty dir outside the repo (the
+# --config path is absolute and --rules lints no files; $HOME itself is too
+# big to walk, an empty dir is not).
 printf '{"rules":{}}\n' > "$cache_dir/oxlintrc-probe.jsonc"
-( cd "$cache_dir" && bunx --bun "oxlint@$oxlint_version" --config "$cache_dir/oxlintrc-probe.jsonc" --rules -f json ) > "$cache_dir/oxlint-rules.json"
+probe_cwd="$HOME/.cache/zdtd/oxlint-probe-cwd"
+mkdir -p "$probe_cwd"
+( cd "$probe_cwd" && bunx --bun "oxlint@$oxlint_version" --config "$cache_dir/oxlintrc-probe.jsonc" --rules -f json ) > "$cache_dir/oxlint-rules.json"
 python3 "$root/scripts/oxlint-flatten-presets.py" "$cache_dir/oxlint-rules.json" \
   "$cache_dir/strict-resolved.json" \
   "$presets/strict.json" "$presets/strict-web.json"
