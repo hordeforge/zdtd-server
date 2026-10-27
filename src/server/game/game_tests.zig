@@ -7426,3 +7426,18 @@ fn hookMaxUses(g: *Game, item_id: u16, quality: u8) u32 {
     const def = g.items.byId(item_id) orelse return 0;
     return @import("hooks.zig").maxUseTimes(def, quality);
 }
+
+test "plant_ctx outlives loadAssets as the Game-stable table pointer" {
+    // Regression: plant_ctx used to point at a loadAssets block-local IdCtx.
+    // The copy into World outlived that frame, so the first prefab paint after
+    // init (the trader-gate lazy chunk create) read a dead wrapper and faulted
+    // in maxdamage.idName. The stored context must be the Game-owned table.
+    const g = try Game.createWithOptions(std.testing.allocator, ".zdtd_cfg_cache/plant_ctx_stable", 0, .{});
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    try std.testing.expectEqual(@as(?*const anyopaque, @ptrCast(&g.maxdamage)), g.world.plant_ctx);
+    const is_plant = g.world.is_plant_block orelse return error.TestUnexpectedResult;
+    _ = is_plant(g.world.plant_ctx, 0);
+}

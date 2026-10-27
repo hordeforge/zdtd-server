@@ -272,15 +272,20 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
             /// `BlockShapeBillboardPlant` after Extends resolution (block-shapes.md
             /// 2): rotation is `& 3` at 20 degree steps, so a rotated POI stamp
             /// must not give a plant the cube step.
+            // ctx is the Game-stable maxdamage Table itself, not the block-local
+            // IdCtx wrapper: plant_ctx is read from World on every lazy chunk
+            // create (trader gate toggle, join streaming), long after this
+            // function returned, and a pointer to a dead stack IdCtx faulted in
+            // idName on the first paint past init.
             fn isPlantBlock(ctx: ?*anyopaque, id: u16) bool {
-                const self_t: *const @This() = @ptrCast(@alignCast(ctx.?));
-                const name = self_t.t.idName(id) orelse return false;
-                return self_t.t.isShapePlant(name);
+                const t: *const assets_maxdamage.Table = @ptrCast(@alignCast(ctx.?));
+                const name = t.idName(id) orelse return false;
+                return t.isShapePlant(name);
             }
         };
         var id_ctx: IdCtx = .{ .t = &self.maxdamage };
         self.world.is_plant_block = IdCtx.isPlantBlock;
-        self.world.plant_ctx = &id_ctx;
+        self.world.plant_ctx = &self.maxdamage;
         // blockplaceholders.xml: the prefab paint pass resolves these names per
         // cell (BlockPlaceholderMap::Replace). Loaded before the first prefab so
         // the remap can record the placeholder slots; the sandbox gate is a
