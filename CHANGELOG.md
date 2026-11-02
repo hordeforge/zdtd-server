@@ -5,9 +5,43 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ## [Unreleased]
 
-### Changed
+## [0.13.0] - 2026-11-02
 
-- Development builds identify as `0.13.0-dev.1`, keeping the immutable `v0.12.0` release identity exclusive to its tagged commit.
+### Added
+
+- **Stock V3.3.0 b18 wire.** Retargeted wire protocol to stock 7DTD V3.3.0 b18:
+  NetPackagePlayerId three WriteBlob containers and network ecd tail, toolbelt
+  config row sync, and stream-budget paced spawn-area transmission.
+- **Budgeted autosave store slicing.** Periodic store writes (containers,
+  workstations, traders, signs, claims, etc.) are sliced across successive
+  ticks (up to 3 files per tick) to hold the 50 ms tick budget against fsync
+  latency, monitored via the `save_stores` counter.
+- **Trader gate warming at init.** Trader gate areas are evaluated and warmed
+  during server creation rather than incurring a first-touch chunk walk on the
+  first mid-session open/close transition.
+- **Drone companion state machine.** Implemented the 9-state drone companion
+  state machine, transition table, entity state tracking, and S2C companion
+  wire bodies.
+- **POI block triggers.** Implemented BlockActivateSwitch triggers, door and
+  block downgrade mutations, trigger latching, channel combination, and prefab
+  block remapping via `<name>.blocks.nim`.
+- **Dynamic light grid and moving lights.** Implemented block-light spread,
+  sunlight column walks, and held-item light emission every tick.
+- **Survival systems and DoT simulation.** Added core-temperature loop,
+  infection, bleeding, and poison counters driving HealthChangeOT, plus
+  encumbrance speed modifiers and elemental armor mitigation.
+- **Turret and collector simulation.** Added line-of-sight turret targeting
+  with burst firing and wear, plus full dew collector cycle,
+  catalytic/converter mod handling, and ambient hum.
+- **Clean worker pool shutdown.** Added explicit worker pool draining on
+  server shutdown.
+
+### Fixed
+
+- **Plant context pointer safety.** Resolved dangling pointer in `plant_ctx`
+  after asset reload.
+- **OxLint probe execution.** Executed the webui oxlint rules probe outside the
+  repo tree to isolate lint state.
 
 ## [0.12.0] - 2026-09-29
 
