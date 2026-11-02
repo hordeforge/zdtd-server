@@ -65,6 +65,8 @@ const Pool = struct {
     in_run: std.atomic.Value(bool) = .init(false),
     threads: [max_workers]std.Thread = undefined,
     worker_n: usize = 0,
+    /// Workers still inside workerMain; `deinit` waits for it to reach zero.
+    live_workers: usize = 0,
 
     fn io(self: *Pool) std.Io {
         return self.threaded.io();
@@ -98,8 +100,12 @@ const Pool = struct {
                 };
                 // Detach so process/test exit is not blocked waiting for idle
                 // workers parked on work_cv (pool is process-lifetime).
+                // cordis-boundary: a process that exits without deinit leaves
+                // the parked workers to process death; deinit is the tracked
+                // inverse for everyone still running.
                 self.threads[i].detach();
                 self.worker_n += 1;
+                self.live_workers += 1;
             }
         }
         // Publishes threaded/worker_n to fast-path readers on other threads.
@@ -114,6 +120,8 @@ const Pool = struct {
                 self.work_cv.waitUncancelable(iop, &self.mutex);
             }
             if (self.shutdown and self.job_n == 0) {
+                self.live_workers -= 1;
+                self.done_cv.signal(iop);
                 self.mutex.unlock(iop);
                 return;
             }
@@ -144,7 +152,9 @@ const Pool = struct {
         defer self.in_run.store(false, .release);
 
         const workers = if (self.worker_n == 0) 1 else self.worker_n + 1;
-        if (builtin.single_threaded or workers <= 1 or total < min_parallel_items or self.worker_n == 0) {
+        if (builtin.single_threaded or workers <= 1 or total < min_parallel_items or
+            self.worker_n == 0 or self.shutdown)
+        {
             work(ctx, 0, total);
             return;
         }
@@ -182,9 +192,34 @@ const Pool = struct {
         }
         self.mutex.unlock(iop);
     }
+
+    /// Inverse for the spawns in ensureStarted: wake every parked worker and
+    /// wait for it to leave workerMain. Idempotent, and after it run() stays
+    /// serial (the shutdown guard) while poolIo/IoMutex keep working on the
+    /// Threaded that stays initialized.
+    fn deinit(self: *Pool) void {
+        if (builtin.single_threaded) return;
+        while (self.start_state.load(.acquire) == .starting) std.Thread.yield() catch {};
+        if (self.start_state.load(.acquire) != .started) return; // nothing spawned
+        const iop = self.io();
+        self.mutex.lockUncancelable(iop);
+        if (!self.shutdown) {
+            self.shutdown = true;
+            self.work_cv.broadcast(iop);
+            while (self.live_workers > 0) self.done_cv.waitUncancelable(iop, &self.mutex);
+        }
+        self.mutex.unlock(iop);
+    }
 };
 
 var global_pool: Pool = .{};
+
+/// Tear down the process-wide worker pool: signal shutdown, wait for every
+/// worker, and leave later forRanges serial. Call where process lifetime
+/// ends (main's teardown), after work that still dispatches.
+pub fn shutdown() void {
+    global_pool.deinit();
+}
 
 /// When true, forRanges always runs serially on the calling thread.
 /// Use under deterministic simulation so interleaving cannot depend on the OS
@@ -338,4 +373,30 @@ test "forRanges nested reentry stays serial and covers all" {
     forRanges(64, Outer{ .outer = outer_hits[0..], .nested = nested_hits[0..] }, Outer.work);
     for (outer_hits) |h| try std.testing.expectEqual(@as(u8, 1), h);
     for (nested_hits) |h| try std.testing.expectEqual(@as(u8, 1), h);
+}
+
+test "pool shutdown drains the workers and later forRanges stay correct" {
+    if (builtin.single_threaded) return;
+    const Ctx = struct {
+        hits: []u8,
+        fn work(ctx: @This(), begin: usize, end: usize) void {
+            var i = begin;
+            while (i < end) : (i += 1) ctx.hits[i] = 1;
+        }
+    };
+    // 64 >= min_parallel_items: this dispatch starts the real workers when
+    // the machine has more than one core.
+    var spawned: [64]u8 = @splat(0);
+    forRanges(64, Ctx{ .hits = spawned[0..] }, Ctx.work);
+    for (spawned) |h| try std.testing.expectEqual(@as(u8, 1), h);
+    // The inverse: wakes every parked worker and only returns once they have
+    // all left workerMain (a bug here hangs the test instead of passing it).
+    shutdown();
+    // The pool stays usable: run() falls back to the serial path after
+    // shutdown and still covers the whole range.
+    var serial: [64]u8 = @splat(0);
+    forRanges(64, Ctx{ .hits = serial[0..] }, Ctx.work);
+    for (serial) |h| try std.testing.expectEqual(@as(u8, 1), h);
+    // Idempotent: a second shutdown must not wait on or double-signal anything.
+    shutdown();
 }

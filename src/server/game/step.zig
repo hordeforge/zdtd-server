@@ -577,32 +577,33 @@ pub fn step(self: *Game) !void {
             };
             if (more) self.save_pending_at = self.tick_n;
         }
-        if (save_interval_due) {
-            self.containers.save(self.world.world_dir, self.allocator) catch |e| game_mod.logPersistErr(self, "save containers", e);
-            self.sign_texts.save(self.world.world_dir, self.allocator) catch |e| game_mod.logPersistErr(self, "save sign texts", e);
-            self.player_signs.save(self.world.world_dir, self.allocator) catch |e| game_mod.logPersistErr(self, "save player signs", e);
-            self.workstations.save(self.world.world_dir, self.allocator) catch |e| game_mod.logPersistErr(self, "save workstations", e);
-            self.vending.save(self.world.world_dir) catch |e| game_mod.logPersistErr(self, "save vending", e);
-            self.saveClaims() catch |e| game_mod.logPersistErr(self, "save claims", e);
-            self.saveEntities() catch |e| game_mod.logPersistErr(self, "save entities", e);
-            // Same order as persist.saveAllStores: traders and sleeper markers
-            // must ride the periodic tick, not only admin `.save` / `.saveworld`.
-            self.saveTraders() catch |e| game_mod.logPersistErr(self, "save traders", e);
-            self.sleepers.saveCleared(self.allocator, self.world.world_dir) catch |e| game_mod.logPersistErr(self, "save sleepers-cleared", e);
-            self.sleepers.saveTriggered(self.allocator, self.world.world_dir) catch |e| game_mod.logPersistErr(self, "save sleepers-triggered", e);
-            self.allies.save(self.world.world_dir, self.allocator) catch |e| game_mod.logPersistErr(self, "save allies", e);
-            self.saveBlockMeta() catch |e| game_mod.logPersistErr(self, "save block meta", e);
-            self.saveWeather() catch |e| game_mod.logPersistErr(self, "save weather", e);
-            self.saveClock() catch |e| game_mod.logPersistErr(self, "save clock", e);
-            if (self.players_dirty) {
-                // Clear only on success: the flag is the sole retry signal
-                // (nothing else re-arms it until the next PlayerData), so
-                // dropping it on a failed write strands the session's
-                // inventory and journal until the next mutation.
-                if (self.savePlayers()) |_| {
-                    self.players_dirty = false;
-                } else |e| game_mod.logPersistErr(self, "save players", e);
-            }
+        if (save_interval_due and !self.save_stores_pending) {
+            // The store pass spreads its ~16 temp+fsync+rename saves over the
+            // following ticks (save_stores_per_tick each; fsync alone was ~26 ms
+            // of the ~39 ms save tick). An interval that lands mid-pass waits
+            // for the pass to finish instead of resetting the cursor, which
+            // would starve the tail stores under a short interval.
+            self.save_stores_pending = true;
+            self.save_stores_cursor = 0;
+        }
+    }
+    // Store slice: up to save_stores_per_tick files per tick while a pass is
+    // pending. Each file keeps its temp+fsync+rename atomicity; only the pass
+    // is spread. The same save_io section covers these ticks.
+    if (self.save_stores_pending) {
+        const ss = apm.profiler.scope(&self.harness.prof, .save_io);
+        defer ss.end();
+        var n: usize = 0;
+        while (n < game_mod.save_stores_per_tick and
+            self.save_stores_cursor < interval_store_saves.len) : (n += 1)
+        {
+            const s = interval_store_saves[self.save_stores_cursor];
+            s.save(self) catch |e| game_mod.logPersistErr(self, s.name, e);
+            self.save_stores_cursor += 1;
+            self.harness.counters.inc(.save_stores);
+        }
+        if (self.save_stores_cursor >= interval_store_saves.len) {
+            self.save_stores_pending = false;
         }
     }
     self.sampleFlushCounters();
@@ -769,3 +770,82 @@ pub fn withdrawPluginSrc(self: *Game, src: i16) void {
     }
     self.bots.dropFrom(src);
 }
+
+/// One row of the periodic store pass: the log tag `logPersistErr` uses and
+/// the save itself. Same order as persist.saveAllStores, which admin `.save`
+/// and shutdown still run unbounded.
+const IntervalStoreSave = struct {
+    name: []const u8,
+    save: *const fn (*Game) anyerror!void,
+};
+
+fn intervalSaveContainers(g: *Game) anyerror!void {
+    try g.containers.save(g.world.world_dir, g.allocator);
+}
+fn intervalSaveSignTexts(g: *Game) anyerror!void {
+    try g.sign_texts.save(g.world.world_dir, g.allocator);
+}
+fn intervalSavePlayerSigns(g: *Game) anyerror!void {
+    try g.player_signs.save(g.world.world_dir, g.allocator);
+}
+fn intervalSaveWorkstations(g: *Game) anyerror!void {
+    try g.workstations.save(g.world.world_dir, g.allocator);
+}
+fn intervalSaveVending(g: *Game) anyerror!void {
+    try g.vending.save(g.world.world_dir);
+}
+fn intervalSaveClaims(g: *Game) anyerror!void {
+    try g.saveClaims();
+}
+fn intervalSaveEntities(g: *Game) anyerror!void {
+    try g.saveEntities();
+}
+fn intervalSaveTraders(g: *Game) anyerror!void {
+    try g.saveTraders();
+}
+fn intervalSaveSleepersCleared(g: *Game) anyerror!void {
+    try g.sleepers.saveCleared(g.allocator, g.world.world_dir);
+}
+fn intervalSaveSleepersTriggered(g: *Game) anyerror!void {
+    try g.sleepers.saveTriggered(g.allocator, g.world.world_dir);
+}
+fn intervalSaveAllies(g: *Game) anyerror!void {
+    try g.allies.save(g.world.world_dir, g.allocator);
+}
+fn intervalSaveBlockMeta(g: *Game) anyerror!void {
+    try g.saveBlockMeta();
+}
+fn intervalSaveWeather(g: *Game) anyerror!void {
+    try g.saveWeather();
+}
+fn intervalSaveClock(g: *Game) anyerror!void {
+    try g.saveClock();
+}
+fn intervalSavePlayers(g: *Game) anyerror!void {
+    // Clear only on success: the flag is the sole retry signal (nothing else
+    // re-arms it until the next PlayerData), so dropping it on a failed write
+    // strands the session's inventory and journal until the next mutation.
+    if (!g.players_dirty) return;
+    try g.savePlayers();
+    g.players_dirty = false;
+}
+
+/// The periodic store pass, in saveAllStores order. Traders and the sleeper
+/// markers ride the cadence here, not only admin `.save` / `.saveworld`.
+const interval_store_saves = [_]IntervalStoreSave{
+    .{ .name = "save containers", .save = intervalSaveContainers },
+    .{ .name = "save sign texts", .save = intervalSaveSignTexts },
+    .{ .name = "save player signs", .save = intervalSavePlayerSigns },
+    .{ .name = "save workstations", .save = intervalSaveWorkstations },
+    .{ .name = "save vending", .save = intervalSaveVending },
+    .{ .name = "save claims", .save = intervalSaveClaims },
+    .{ .name = "save entities", .save = intervalSaveEntities },
+    .{ .name = "save traders", .save = intervalSaveTraders },
+    .{ .name = "save sleepers-cleared", .save = intervalSaveSleepersCleared },
+    .{ .name = "save sleepers-triggered", .save = intervalSaveSleepersTriggered },
+    .{ .name = "save allies", .save = intervalSaveAllies },
+    .{ .name = "save block meta", .save = intervalSaveBlockMeta },
+    .{ .name = "save weather", .save = intervalSaveWeather },
+    .{ .name = "save clock", .save = intervalSaveClock },
+    .{ .name = "save players", .save = intervalSavePlayers },
+};

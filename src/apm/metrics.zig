@@ -84,6 +84,8 @@ pub const CounterId = enum(u16) {
     quarantine_rejects,
     /// Weak evidence records dropped while the load-shed valve was open.
     load_shed_drops,
+    /// Store files the budgeted autosave slice wrote on tick paths.
+    save_stores,
     /// Chunk payloads handed to the background flusher.
     chunk_flush_queued,
     /// Chunk payloads written by the background flusher.

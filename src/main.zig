@@ -3,6 +3,7 @@
 
 const std = @import("std");
 const test_tmp = @import("util/test_tmp.zig");
+const util = @import("util/root.zig");
 const game_mod = @import("server/game.zig");
 const packages = @import("wire/packages.zig");
 const frame = @import("wire/frame.zig");
@@ -1155,6 +1156,9 @@ pub fn main(init: std.process.Init.Minimal) !void {
     };
     // The module path list is owned by main (split below); Game does not retain it.
     if (init_opts.plugin_modules.len > 0) gpa.free(init_opts.plugin_modules);
+    // LIFO: destroy runs first (its save/flush paths may still dispatch), then
+    // the pool's inverse drains the process-wide workers.
+    defer util.parallel.shutdown();
     defer g.destroy();
 
     // Always print the one-line config summary: scripts (e.g. auto_join) wait on

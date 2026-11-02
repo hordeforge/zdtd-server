@@ -118,6 +118,12 @@ pub const save_chunks_per_tick: usize = 32;
 /// scan per tick while a burst drains; every few ticks still clears a few
 /// hundred chunks per second.
 pub const save_continue_interval_ticks: u64 = 10;
+/// Store files the periodic save writes in one tick. Each store saves as
+/// temp + fsync + rename, and the interval tick used to run all ~16 back to
+/// back (APM `save_io` mean ~39 ms, fsync max ~9 ms each under load). The
+/// pass spreads them `save_stores_per_tick` per tick; each file stays atomic,
+/// and shutdown/admin saves are still unbounded.
+pub const save_stores_per_tick: usize = 3;
 pub const default_spawn_area_radius_max: i32 = 8;
 pub const default_max_claimed_damage: i32 = 200;
 /// Cap on a claimed sound's `volumeScale` (the client multiplies the clip's

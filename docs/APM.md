@@ -76,6 +76,7 @@ Perf-evidence counters (always on, independent of the `[perf]` switches):
 | `chunk_flush_errors` | Background chunk writes that failed (also `persistence_errors`) |
 | `chunk_flush_sync` | Async submits that fell back to an inline write |
 | `chunk_flush_waits` | Reads / evictions that blocked on a queued write |
+| `save_stores` | Store files the budgeted autosave slice wrote on tick paths |
 | `terrain_snap_chunks` | Chunk coverage summed across rebuilds (divide by the `terrain_snap` section count for the mean window) |
 | `terrain_snap_misses` | Path probes that fell through to the locked hook |
 | `sleeper_volumes_scanned` | Sleeper volumes tested per scan pass |

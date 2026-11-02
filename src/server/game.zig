@@ -179,6 +179,9 @@ pub const default_save_interval_ticks = game_types.default_save_interval_ticks;
 pub const save_chunks_per_tick = game_types.save_chunks_per_tick;
 /// Ticks between chunk-drain continuations (see `save_chunks_per_tick`).
 pub const save_continue_interval_ticks = game_types.save_continue_interval_ticks;
+/// Store files the periodic save writes per tick (the rest of the pass runs
+/// on the following ticks).
+pub const save_stores_per_tick = game_types.save_stores_per_tick;
 pub const default_spawn_area_radius_max = game_types.default_spawn_area_radius_max;
 pub const default_max_claimed_damage = game_types.default_max_claimed_damage;
 pub const default_max_edit_range = game_types.default_max_edit_range;
@@ -281,6 +284,12 @@ pub const Game = struct {
     /// later tick comes back for them instead of waiting a full save interval.
     /// 0 when no drain is outstanding.
     save_pending_at: u64 = 0,
+    /// A periodic store pass is in flight: `save_stores_cursor` walks the
+    /// interval store table `save_stores_per_tick` files per tick, because
+    /// writing all ~16 store files (each temp+fsync+rename) in one tick cost
+    /// ~39 ms mean inside the 50 ms budget.
+    save_stores_pending: bool = false,
+    save_stores_cursor: u8 = 0,
     running: bool = true,
     /// Mono instant of Game init; base for stock `mem` uptime (process elapsed).
     /// CLOCK_MONOTONIC is boot-relative on Linux, so raw monoNs would report
@@ -1301,6 +1310,10 @@ pub const Game = struct {
         // catalog resolves, since an unknown id must keep what was saved
         // rather than fail closed to 1 and destroy a real stack.
         self.clampSavedStoreStacks();
+        // Warm every trader gate area against the current clock before any tick
+        // runs: the walk's first-touch belongs to init, not to the first
+        // open/close edge mid-session (see warmTraderGateAreas).
+        self.warmTraderGateAreas();
     }
 
     /// Test hook: scenarios swap the item catalog after construction, so they
@@ -3069,6 +3082,10 @@ pub const Game = struct {
 
     pub fn tickTraderAreas(self: *Game) void {
         return game_trader.tickTraderAreas(self);
+    }
+
+    pub fn warmTraderGateAreas(self: *Game) void {
+        return game_trader.warmTraderGateAreas(self);
     }
 
     fn toggleTraderGates(self: *Game, s: ecs.Slot, closed: bool) void {

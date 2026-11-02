@@ -10778,6 +10778,11 @@ test "scenario autosave tick writes traders.zst without admin save" {
     const t = ts orelse return error.TestUnexpectedResult;
     g.sim.trader_stock[t].wallet = 4242;
     try g.step();
+    // The periodic pass spreads its store files over following ticks; drain it
+    // before reading the trader file (save_stores_per_tick per tick).
+    var drain: usize = 0;
+    while (g.save_stores_pending and drain < 16) : (drain += 1) try g.step();
+    try std.testing.expect(!g.save_stores_pending);
     var path_buf: [512]u8 = undefined;
     const p = try std.fmt.bufPrint(&path_buf, "{s}/traders.zst", .{g.world.world_dir});
     const blob = try io_fs.readFileAll(gpa, p);
@@ -10787,6 +10792,95 @@ test "scenario autosave tick writes traders.zst without admin save" {
     try persist.loadTraders(g);
     try std.testing.expectEqual(@as(i32, 4242), g.sim.trader_stock[t].wallet);
     std.debug.print("PASS trader-autosave: periodic tick persists traders.zst\n", .{});
+}
+
+test "scenario autosave store slice caps files per tick and drains the set" {
+    // One fsync per store file made the interval tick cost ~39 ms mean inside
+    // the 50 ms budget; the slice writes save_stores_per_tick files per tick.
+    // Counter-based, no wall clock: the per-tick cap and the completed pass
+    // must hold on any machine.
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_storesslice");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+
+    const g = try game_mod.Game.createWithOptions(gpa, "worlds/zdtd_sc_storesslice", 0, .{
+        .save_interval_ticks = 4,
+    });
+    defer g.destroy();
+    var last = g.harness.counters.get(.save_stores);
+    var saw_arm = false;
+    var steps: usize = 0;
+    while (steps < 32) : (steps += 1) {
+        try g.step();
+        const now = g.harness.counters.get(.save_stores);
+        try std.testing.expect(now - last <= game_mod.save_stores_per_tick);
+        last = now;
+        if (g.save_stores_pending) saw_arm = true;
+        if (saw_arm and !g.save_stores_pending) break;
+    }
+    try std.testing.expect(saw_arm);
+    try std.testing.expect(!g.save_stores_pending);
+    // Completeness sample: the drained pass wrote the trader store.
+    var path_buf: [512]u8 = undefined;
+    const p = try std.fmt.bufPrint(&path_buf, "{s}/traders.zst", .{g.world.world_dir});
+    const blob = try io_fs.readFileAll(gpa, p);
+    defer gpa.free(blob);
+    try std.testing.expect(blob.len >= 8);
+    std.debug.print("PASS store-slice: capped per tick, set drains, traders written\n", .{});
+}
+
+test "scenario trader gate warm lands the clock state without a step" {
+    // create calls warmTraderGateAreas so the first-touch walk runs in init;
+    // re-warming after a clock change must make every trader's recorded state
+    // equal the window evaluation with no tick, because on a fresh map that
+    // walk inside one sim_entities tick was the 7.4 s freeze that timed the
+    // client's transport out.
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_gate_warm");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+
+    // TraderHours preset 1 (04:01..11:50): flat worlds ship no npc.xml hours
+    // (an empty window reads open always) and the preset window replaces that
+    // empty check, so a night clock has something to close.
+    const g = try game_mod.Game.createWithOptions(gpa, "worlds/zdtd_sc_gate_warm", 0, .{
+        .trader_hours_preset = 1,
+    });
+    defer g.destroy();
+    try std.testing.expectEqual(@as(u64, 0), g.tick_n);
+
+    const Eval = struct {
+        fn every(gm: *game_mod.Game) !void {
+            for (ecs_query.groupSlice(&gm.sim, .trader)) |s| {
+                if (!gm.sim.mask[s].trader_stock) continue;
+                const want = !gm.traderIsOpen(s);
+                const got = gm.sim.trader_stock[s].is_closed;
+                std.debug.print(
+                    "gate-warm eval slot={d} info={d} want_closed={} got={}\n",
+                    .{ s, gm.sim.trader_stock[s].trader_info_id, want, got },
+                );
+                try std.testing.expectEqual(want, got);
+            }
+        }
+    };
+    g.sim.director.clock.hours = 23.0;
+    g.warmTraderGateAreas();
+    try Eval.every(g);
+    // Corrupt every recorded flag: the next warm must re-sync it to the
+    // evaluation, so a no-op warm fails here even though the flat world's
+    // window never flips on its own.
+    for (ecs_query.groupSlice(&g.sim, .trader)) |s| {
+        if (!g.sim.mask[s].trader_stock) continue;
+        g.sim.trader_stock[s].is_closed = true;
+    }
+    g.sim.director.clock.hours = 8.0;
+    g.warmTraderGateAreas();
+    try Eval.every(g);
+    try std.testing.expectEqual(@as(u64, 0), g.tick_n);
+    std.debug.print("PASS gate-warm: clock state lands with no tick\n", .{});
 }
 
 test "scenario a trader entry with an unresolvable item does not shift the saved record" {

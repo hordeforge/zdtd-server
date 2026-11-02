@@ -91,6 +91,22 @@ pub fn tickTraderAreas(self: *Game) void {
     }
 }
 
+/// Apply each trader area's current open/closed state once, at create: force
+/// the gate walk even when it matches `is_closed`, so `heightWorld` first-
+/// touches the area's chunks during init (slow is fine there). Without it the
+/// first open/close edge mid-session walks a fresh map's whole area inside one
+/// sim_entities tick: 7.4 s under load, long enough for the client's transport
+/// to time out and end the session (APM r144_live: sim_entities max 7397 ms).
+pub fn warmTraderGateAreas(self: *Game) void {
+    for (ecs.groupSlice(&self.sim, .trader)) |s| {
+        if (!self.sim.mask[s].trader_stock) continue;
+        const st = &self.sim.trader_stock[s];
+        const closed = !traderIsOpen(self, s);
+        st.is_closed = closed;
+        toggleTraderGates(self, s, closed);
+    }
+}
+
 pub fn toggleTraderGates(self: *Game, s: ecs.Slot, closed: bool) void {
     const tr = self.sim.transform[s];
     const pf = if (self.world.prefabs) |*p| p else return;
