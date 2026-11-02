@@ -186,6 +186,7 @@ because it globs `.zig`.
 
 | File | B | Stock source (header-cited; R rows cite the RE doc) |
 |---|---|---|
+| `src/abi.zig` | Z | Versioned C ABI for the embeddable `libzdtd` static library: opaque world handle over the ECS simulation plus create, destroy, one sim tick and last-error copy. No stock counterpart; the simulation behavior comes from the imported `ecs` modules |
 | `src/apm/metrics.zig` | Z | Monotonic counters and latency histograms for zdtd (not 7dtd-server-apm) |
 | `src/server/game/vehicle.zig` `sendDroneWaypoints` | R | `NetPackageEntityWaypointList` with `eWayPointListType` Drone (1), the sibling of the vehicle list (0) (`VehicleManager`/`DroneManager` waypoint updates, RE vehicles-drones-turrets.md 1173) |
 | `src/world/props.zig` | Z | Prop tuple store for `NetPackageSetProp`, keyed by (chunk, prop id), fixed capacity, overwrite by key (no packet-path allocation) |
