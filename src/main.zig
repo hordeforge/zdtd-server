@@ -1308,6 +1308,7 @@ test {
     _ = @import("world/root.zig");
     _ = @import("server/root.zig");
     _ = @import("plugin/root.zig");
+    _ = @import("abi.zig");
 }
 
 fn serverAdminSiblingPath(buf: []u8, serverconfig_path: []const u8) ?[]const u8 {

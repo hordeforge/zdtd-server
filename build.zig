@@ -85,6 +85,24 @@ pub fn build(b: *std.Build) void {
     });
     b.installArtifact(exe);
 
+    // Embeddable static library: the versioned C ABI over the ECS simulation.
+    // It imports ecs (which may import util only), so unlike the server root it
+    // needs no zwasm or build_options wiring.
+    const abi_mod = b.createModule(.{
+        .root_source_file = b.path("src/abi.zig"),
+        .target = target,
+        .optimize = optimize,
+        .strip = strip,
+    });
+    const abi_lib = b.addLibrary(.{
+        .name = "zdtd",
+        .root_module = abi_mod,
+        .linkage = .static,
+        .use_llvm = true,
+    });
+    b.installArtifact(abi_lib);
+    b.installFile("include/zdtd.h", "include/zdtd.h");
+
     const run_step = b.step("run", "Run zdtd dedicated server");
     const run_cmd = b.addRunArtifact(exe);
     run_step.dependOn(&run_cmd.step);
@@ -123,6 +141,29 @@ pub fn build(b: *std.Build) void {
     const run_unit_tests = b.addRunArtifact(unit_tests);
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_unit_tests.step);
+
+    // C ABI smoke test: a foreign C program compiled and linked against the
+    // static archive. A missing archive or symbol fails the link; a wrong ABI
+    // version, create failure or failed tick fails the run.
+    const abi_smoke_mod = b.createModule(.{
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    abi_smoke_mod.addCSourceFile(.{
+        .file = b.path("tests/abi_smoke.c"),
+        .flags = &.{ "-std=c11", "-Wall", "-Wextra", "-Werror" },
+    });
+    abi_smoke_mod.addIncludePath(b.path("include"));
+    abi_smoke_mod.linkLibrary(abi_lib);
+    const abi_smoke = b.addExecutable(.{
+        .name = "abi-smoke",
+        .root_module = abi_smoke_mod,
+    });
+    const run_abi_smoke = b.addRunArtifact(abi_smoke);
+    const abi_smoke_step = b.step("abi-smoke", "Build and run the C ABI smoke test");
+    abi_smoke_step.dependOn(&run_abi_smoke.step);
+    test_step.dependOn(&run_abi_smoke.step);
 
     const cli_test_step = b.step("test-cli", "Check CLI output and exit codes without starting the server");
     test_step.dependOn(cli_test_step);

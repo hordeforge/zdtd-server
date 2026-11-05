@@ -13,6 +13,8 @@
         "build.zig.zon",
         ".zigversion",
         "src",
+        "include",
+        "tests",
         "assets/fixtures",
         "presets",
         "scripts",
