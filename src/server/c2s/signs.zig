@@ -4,9 +4,11 @@
 //! gameplay/signs.md §7).
 //!
 //! The server relays both to every other client. Upload (`SingleSignData`) is
-//! intentionally not sender-validated, matching stock: `ProcessSignReceived`
-//! never reads `Sender` and only checks the blob is non-null (the two trust
-//! gaps are recorded in GAP_ANALYSIS). Delete is ownership-checked (§6).
+//! sender-checked, a deliberate divergence from stock: `ProcessSignReceived`
+//! never reads `Sender` and accepts a blob into any player library (signs.md
+//! §7). zdtd refuses a write whose library is not the sender's own, so a peer
+//! cannot poison another player's library or a prefab library (DIVERGENCES
+//! 1.18). Deletes are ownership-checked the same way (§6).
 
 const std = @import("std");
 const game_mod = @import("../game.zig");
@@ -62,7 +64,6 @@ fn signGuid(blob: []const u8) ?[16]u8 {
 
 /// True when `name` is a sign-library package and was handled.
 pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, body: []const u8) anyerror!bool {
-    _ = peer; // relay keys on c.slot; the wire body carries no peer fields
     if (std.mem.eql(u8, name, "NetPackageSingleSignData")) {
         var lib_buf: [160]u8 = undefined;
         const pkg = stock_sign.parseSingleSignData(body, &lib_buf) catch {
@@ -71,10 +72,35 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         };
         // Stock logs and ignores an empty blob (§1.5.2); nothing to relay.
         if (pkg.blob.len == 0) return true;
+        // Sender check, the thing stock's upload path omits (signs.md §7): a
+        // client may only write its own player library. Local libraries
+        // (`[I]`, `[U]`) and `[D]` are stock editor/default content, and a
+        // prefab library is server-side editor state (§3), so an id that is
+        // not a player library is refused outright. Anything else that is not
+        // the sender's own id (another player, or a prefab name that happens
+        // to parse as one) is an ownership reject. Both are silent drops: no
+        // store write, no relay, counted and logged like the delete refusals.
+        if (isLocalLibraryId(pkg.library_id) or std.mem.eql(u8, pkg.library_id, "[D]") or !isPlayerLibraryId(pkg.library_id)) {
+            self.harness.counters.inc(.c2s_rejects);
+            const n = self.harness.counters.get(.c2s_rejects);
+            log.warnEvery(n, "sign upload to non-player library '{s}' rejected local_id={d}\n", .{ pkg.library_id, peer.local_id });
+            return true;
+        }
+        var mine_buf: [160]u8 = undefined;
+        const mine = senderLibraryId(c, &mine_buf) orelse {
+            // A peer with no platform identity owns no player library.
+            self.harness.counters.inc(.ownership_rejects);
+            return true;
+        };
+        if (!std.mem.eql(u8, pkg.library_id, mine)) {
+            self.harness.counters.inc(.ownership_rejects);
+            const n = self.harness.counters.get(.ownership_rejects);
+            log.warnEvery(n, "sign upload to foreign library '{s}' rejected sender='{s}' local_id={d}\n", .{ pkg.library_id, mine, peer.local_id });
+            return true;
+        }
         // Store the opaque blob under (library, guid): the blob head is
-        // `version i32 | guid 16` (signs.md §2). Stock's StorePlayerSignBlob
-        // takes any non-null blob for a player library with no sender check;
-        // the upsert keys on the guid so a re-draw replaces the same sign.
+        // `version i32 | guid 16` (signs.md §2). The upsert keys on the guid
+        // so a re-draw replaces the same sign; only the owner reaches here.
         if (signGuid(pkg.blob)) |guid| {
             const stored = self.player_signs.put(pkg.library_id, &guid, pkg.blob);
             if (stored == null) {

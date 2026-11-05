@@ -38,6 +38,7 @@ const assets_items = @import("../../assets/items.zig");
 const io_fs = @import("../../util/io_fs.zig");
 
 const stock_sign = packages.stock_sign;
+const player_signs_mod = @import("../../world/player_signs.zig");
 
 const deco = packages.stock_deco;
 
@@ -501,13 +502,44 @@ pub fn sendDecoForStreamedChunk(self: *Game, c: *Client, peer: *ln_peer.Peer, cx
     }
 }
 
+/// The joining peer's player-library id, the `InternalId.CombinedString()`
+/// `<platform>_<id>` form (signs.md §3). Null when the peer has no platform
+/// identity, which also means it owns no player library.
+fn receiverSignLibraryId(self: *Game, peer: *ln_peer.Peer, out: []u8) ?[]const u8 {
+    const c = self.clientFor(peer) orelse return null;
+    const pid = c.puid_primary.get() orelse return null;
+    return std.fmt.bufPrint(out, "{s}_{s}", .{ pid.platform, pid.id }) catch null;
+}
+
 pub fn sendSignDataBatches(self: *Game, peer: *ln_peer.Peer) !void {
-    // V3.3.0 b18: the download carries the prefab catalog AND every player
-    // library (signs.md §7), so the final `isLastBatch` belongs to whichever
-    // section still has entries after this one. A lone empty prefab set with no
-    // player signs still ships one empty last batch (worldInfoCo blocks on it).
+    // V3.3.0 b18: the download carries the prefab catalog AND the player
+    // libraries this receiver may see (signs.md §7), so the final `isLastBatch`
+    // belongs to whichever section still has entries after this one. A lone
+    // empty prefab set with no player signs still ships one empty last batch
+    // (worldInfoCo blocks on it).
     const prefab_n = self.signs.entries.len;
-    const player_n = self.player_signs.liveCount();
+    // Stock ships every player library, Private drawings included (§7). zdtd
+    // delivers what the gallery would show (§5): the receiver's own library in
+    // full, another player's drawing only when the sender marked it Selectable
+    // or Copyable (both shareable; only Private is withheld). A blob whose head
+    // does not parse is withheld from other players (fail closed). This is the
+    // join half of DIVERGENCES 1.19.
+    var recv_buf: [player_signs_mod.max_library_id + 32]u8 = undefined;
+    const recv_lib: ?[]const u8 = receiverSignLibraryId(self, peer, &recv_buf);
+    var entries: [player_signs_mod.max_signs]stock_sign.RawSignEntry = undefined;
+    var cursor: usize = 0;
+    var player_n: usize = 0;
+    while (player_n < entries.len) {
+        const e = self.player_signs.next(&cursor) orelse break;
+        const own_library = if (recv_lib) |lib| std.mem.eql(u8, e.library(), lib) else false;
+        if (!own_library and
+            (stock_sign.blobSharing(e.blob[0..e.len]) orelse stock_sign.sharing_private) == stock_sign.sharing_private)
+        {
+            continue;
+        }
+        entries[player_n] = .{ .library_id = e.library(), .blob = e.blob[0..e.len] };
+        player_n += 1;
+    }
     if (prefab_n == 0 and player_n == 0) {
         const resp = try packages.buildSignDataResponseEmptyLast(self.body_buf[0..16]);
         try self.sendGameCritical(peer, "NetPackageSignDataResponse", resp);
@@ -548,19 +580,12 @@ pub fn sendSignDataBatches(self: *Game, peer: *ln_peer.Peer) !void {
     // Player-library signs: opaque blobs batched raw. The final batch carries
     // is_last (or the prefab loop already did, when there were none).
     if (player_n > 0) {
-        var entries: [64]stock_sign.RawSignEntry = undefined;
-        var cursor: usize = 0;
-        var pi: usize = 0;
-        while (pi < player_n and pi < entries.len) : (pi += 1) {
-            const e = self.player_signs.next(&cursor) orelse break;
-            entries[pi] = .{ .library_id = e.library(), .blob = e.blob[0..e.len] };
-        }
         var start_p: usize = 0;
-        while (start_p < pi) {
+        while (start_p < player_n) {
             const last_chance = start_p;
-            const probe = try stock_sign.buildSignDataResponseBatchRaw(&self.body_buf, entries[0..pi], start_p, false);
-            const is_last = probe.next >= pi;
-            const batch = try stock_sign.buildSignDataResponseBatchRaw(&self.body_buf, entries[0..pi], start_p, is_last);
+            const probe = try stock_sign.buildSignDataResponseBatchRaw(&self.body_buf, entries[0..player_n], start_p, false);
+            const is_last = probe.next >= player_n;
+            const batch = try stock_sign.buildSignDataResponseBatchRaw(&self.body_buf, entries[0..player_n], start_p, is_last);
             if (is_last) try self.sendGameCritical(peer, "NetPackageSignDataResponse", batch.body) else try self.sendGame(peer, "NetPackageSignDataResponse", batch.body);
             start_p = batch.next;
             if (start_p == last_chance) break;

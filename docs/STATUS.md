@@ -827,10 +827,12 @@ Landed so far:
   `NetPackageItemDrop`/`NetPackageSetBlock`/blob push (ADR 0007);
   transaction-semantics tests retire; quarantine on bag and SetBlock.
 
-- **Sign push packages landed.** `SignData.Write` carries the b18 `version=3`
-  head + `sharing` byte so the join `SignDataResponse` parses on a b18 client.
-  New `c2s/signs.zig` handles `NetPackageSingleSignData` (relay, no sender check)
-  and `NetPackageSignDelete` (ownership-gated, then relay), with a scenario.
+- **Sign push packages landed, trust gaps closed.** `SignData.Write` carries the
+  b18 `version=3` head + `sharing` byte. `c2s/signs.zig` handles
+  `NetPackageSingleSignData` (sender-checked: own player library only) and
+  `NetPackageSignDelete` (ownership-gated, then relay); the join download
+  withholds `Private` drawings from non-owners. Both are
+  [DIVERGENCES](DIVERGENCES.md) 1.18/1.19, with scenarios.
 
 - **b18 console commands.** `listitems`/`li <substring>` prints the matching item
   names (`*` for all); `give` gains stock's optional `[quality<=6]` (default 6,
@@ -853,8 +855,8 @@ stock saves, so they do not apply. Spawn-selection/Burst are client UI.
 - **Per-player sign libraries persist (b18).** `world/player_signs.zig` stores
   opaque `SignData` blobs keyed by `(library, guid)` in a `ZPS1` world file;
   `SingleSignData` upserts, `SignDelete` removes, and the join
-  `SignDataResponse` re-serves them after the prefab catalog. Saved with the
-  other stores, loaded at boot; a scenario pins push -> store -> join-serve.
+  `SignDataResponse` re-serves them filtered by `SignSharing` (DIVERGENCES
+  1.19). Saved with the other stores, loaded at boot; scenarios pin the gates.
 
 - **Generator refuel rides the power-source TE (b18).** The InvTx place-op
   trigger is gone, so refuel is `NetPackageTileEntity` with a

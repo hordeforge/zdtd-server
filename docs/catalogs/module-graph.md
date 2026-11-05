@@ -30,7 +30,7 @@ Only imports of another package directory are counted; single-file imports
 | `server` | `server/game` | 32 |
 | `server` | `util` | 190 |
 | `server` | `wire` | 160 |
-| `server` | `world` | 108 |
+| `server` | `world` | 109 |
 | `wire` | `assets` | 13 |
 | `wire` | `ecs` | 5 |
 | `wire` | `util` | 9 |

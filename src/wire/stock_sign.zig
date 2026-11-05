@@ -20,6 +20,26 @@ pub const max_batch_payload: usize = 48 * 1024;
 /// is out of 1..=3, so this head must be present or the client drops the entry.
 pub const sign_data_version: i32 = 3;
 
+/// `SignData.SignSharing.Private` (gameplay/signs.md §5): the default, and the
+/// one mode the join download withholds from another player's client.
+pub const sharing_private: u8 = 0;
+
+/// The `sharing` byte from a serialized `SignData` head, or null when the blob
+/// is too short to carry it (fail closed: callers treat null as Private).
+/// Head order is `version i32 | guid 16 | name string | ticks i64 | nextPoly,
+/// nextText, nextNoise, nextGroup i32 | sharing u8` (gameplay/signs.md §2).
+pub fn blobSharing(blob: []const u8) ?u8 {
+    var r: binary.Reader = .{ .data = blob };
+    _ = r.readI32() catch return null; // version
+    if (r.remaining() < 16) return null;
+    r.pos += 16; // guid
+    r.skipString() catch return null; // name
+    _ = r.readI64() catch return null; // lastModified
+    var i: usize = 0;
+    while (i < 4) : (i += 1) _ = r.readI32() catch return null;
+    return r.readByte() catch null;
+}
+
 /// Encode SignData with its layer stack (research gameplay/signs.md §2):
 /// version, guid, name, ticks, four next-ids, sharing byte, layer count, then
 /// each layer as TypeId byte + InternalWrite payload + shared tail. A layer
@@ -295,6 +315,28 @@ pub fn parseSignDelete(body: []const u8, lib_buf: []u8) !SignDelete {
     @memcpy(&guid, r.data[r.pos..][0..16]);
     r.pos += 16;
     return .{ .library_id = lib, .sign_guid = guid };
+}
+
+test "sign blob sharing head is readable and truncated heads fail closed" {
+    const e = [_]SignEntry{.{
+        .library = "Steam_1001",
+        .name = "drawing",
+        .guid = @splat(0x44),
+        .sharing = 2,
+    }};
+    var buf: [256]u8 = undefined;
+    const r = try buildSignDataResponseBatch(&buf, &e, 0, true);
+    // Body: isLast | dataLen | size marker | library string | SignData.
+    var rd: binary.Reader = .{ .data = r.body[9..] };
+    var s_buf: [32]u8 = undefined;
+    _ = try rd.readString(&s_buf);
+    try std.testing.expectEqual(@as(?u8, 2), blobSharing(rd.data[rd.pos..]));
+    // A blob cut before the sharing byte is Private, never guessed. The tail
+    // after sharing is the layer count (i32), so cutting it and the byte gives
+    // the head the filter sees on a truncated push.
+    const head_len = rd.data.len - rd.pos;
+    try std.testing.expectEqual(@as(?u8, null), blobSharing(rd.data[rd.pos..][0 .. head_len - 5]));
+    try std.testing.expectEqual(@as(?u8, null), blobSharing(&[_]u8{ 3, 0, 0, 0 }));
 }
 
 test "raw sign batch writes libraryId and verbatim blob" {

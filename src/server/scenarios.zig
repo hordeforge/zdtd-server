@@ -25954,9 +25954,10 @@ test "scenario a fetch objective only advances from its own POI" {
 
 test "scenario sign: SingleSignData relays and SignDelete is ownership-gated" {
     // V3.3.0 b18 sign pushes (protocol-packages.md §1.5.2/§1.5.3). A pushes a
-    // drawing; the server relays it to B (no sender check on upload, matching
-    // stock). A delete for a player library B does not own is refused; a delete
-    // for A's own library relays.
+    // drawing to its own library; the server relays it to B. A delete for a
+    // player library B does not own is refused; a delete for A's own library
+    // relays. The upload sender check and the join sharing filter have their
+    // own scenario below.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const dir = try test_tmp.rootOf(&tmp);
@@ -25982,19 +25983,16 @@ test "scenario sign: SingleSignData relays and SignDelete is ownership-gated" {
     // --- SingleSignData: A uploads to its library; B receives the relay. ---
     cap_b.clear();
     {
-        // A realistic SignData blob head: version=3 (i32) then the 16-byte
-        // guid the store keys on, then a tail (signs.md §2).
+        // A realistic SignData head (signs.md §2) with sharing Copyable, so
+        // the join sharing filter still delivers it to B.
         var a_guid: [16]u8 = @splat(0);
         a_guid[0] = 7;
         var body: [512]u8 = undefined;
         var w: binary.Writer = .{ .buf = &body };
         try w.writeString(a_lib);
-        var a_blob: [24]u8 = undefined;
-        var bw: binary.Writer = .{ .buf = &a_blob };
-        try bw.writeI32(3); // SignData version
-        try bw.writeBytes(&a_guid);
-        try bw.writeBytes(&[_]u8{ 9, 9, 9 });
-        const a_blob_len = bw.written().len;
+        var a_blob_buf: [96]u8 = undefined;
+        const a_blob = try testSignBlob(&a_blob_buf, a_guid, 2);
+        const a_blob_len = a_blob.len;
         try w.writeI32(@intCast(a_blob_len));
         try w.writeBytes(a_blob[0..a_blob_len]);
         var fb: [640]u8 = undefined;
@@ -26071,6 +26069,192 @@ test "scenario sign: SingleSignData relays and SignDelete is ownership-gated" {
     try std.testing.expect(cap_a.findPkgId(sd_id) == null);
 
     std.debug.print("PASS sign push: SingleSignData relays, SignDelete ownership-gated\n", .{});
+}
+
+/// A version-3 `SignData` head with `sharing` set (gameplay/signs.md §2:
+/// version, guid, name, ticks, four next-id counters, sharing byte). The layer
+/// stack stays empty: the store keys on the guid and the join filter reads the
+/// sharing byte, both in this head. `SignSharing` is 0 Private, 1 Selectable,
+/// 2 Copyable (§5).
+fn testSignBlob(buf: []u8, guid: [16]u8, sharing: u8) ![]u8 {
+    var w: binary.Writer = .{ .buf = buf };
+    try w.writeI32(3); // SignData.cCurrentBinaryVersion
+    try w.writeBytes(&guid);
+    try w.writeString("drawing");
+    try w.writeI64(0); // lastModified
+    try w.writeI32(0); // nextPoly
+    try w.writeI32(0); // nextText
+    try w.writeI32(0); // nextNoise
+    try w.writeI32(0); // nextGroup
+    try w.writeByte(sharing);
+    try w.writeI32(0); // layer count
+    return w.written();
+}
+
+/// Count the `NetPackageSignDataResponse` bodies in `cap` whose bytes contain
+/// `needle`. Player-library entries ship as opaque `SignData` blobs, so a guid
+/// in the body bytes is the observable proof that the entry was delivered.
+fn countSignResponseBodiesWith(cap: *ln_peer.Capture, needle: []const u8) usize {
+    const sdr_id = packages.idOf("NetPackageSignDataResponse") orelse return 0;
+    var ps: wire_frame.ParseState = .{};
+    var found: usize = 0;
+    for (cap.slots[0..cap.n]) |*slot| {
+        const msg = slot.data[0..slot.len];
+        var pkgs: [8]wire_frame.Package = undefined;
+        const pn = wire_frame.parseChannelPayload(&ps, msg, &pkgs);
+        for (pkgs[0..pn]) |p| {
+            if (p.id == sdr_id and std.mem.indexOf(u8, p.body, needle) != null) found += 1;
+        }
+    }
+    return found;
+}
+
+/// Inject one `NetPackageSingleSignData` for `library` carrying `blob`.
+fn injectSignUpload(g: *game_mod.Game, c: *Client, library: []const u8, blob: []const u8) !void {
+    var body: [512]u8 = undefined;
+    var w: binary.Writer = .{ .buf = &body };
+    try w.writeString(library);
+    try w.writeI32(@intCast(blob.len));
+    try w.writeBytes(blob);
+    var fb: [640]u8 = undefined;
+    try g.injectFramed(c, try packages.framed(&fb, "NetPackageSingleSignData", w.written()));
+}
+
+test "scenario sign: foreign-library upload is refused and leaves the store unchanged" {
+    // Deliberate divergence from stock (docs/DIVERGENCES.md): stock accepts a
+    // push into any player library (gameplay/signs.md §7, upload has no sender
+    // check). zdtd requires the target to be the sender's own library, so B
+    // writing into A's library must not land and must not relay.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+
+    var cap_a: ln_peer.Capture = .{};
+    var cap_b: ln_peer.Capture = .{};
+    const ca = try g.attachJoinedClientAs(&cap_a, .{ .platform = "Steam", .id = "1001" });
+    const cb = try g.attachJoinedClientAs(&cap_b, .{ .platform = "Steam", .id = "1002" });
+
+    var mine: [160]u8 = undefined;
+    const a_lib = if (ca.puid_primary.get()) |pid|
+        std.fmt.bufPrint(&mine, "{s}_{s}", .{ pid.platform, pid.id }) catch return error.TestUnexpectedResult
+    else
+        return error.SkipZigTest;
+
+    var blob_buf: [96]u8 = undefined;
+    const a_guid: [16]u8 = @splat(0x11);
+    try injectSignUpload(g, ca, a_lib, try testSignBlob(&blob_buf, a_guid, 2));
+    try std.testing.expectEqual(@as(usize, 1), g.player_signs.liveCount());
+
+    // B pushes a drawing into A's library.
+    cap_a.clear();
+    const rejects_before = g.harness.counters.get(.ownership_rejects);
+    const b_guid: [16]u8 = @splat(0x22);
+    try injectSignUpload(g, cb, a_lib, try testSignBlob(&blob_buf, b_guid, 2));
+
+    // The foreign write is refused: the store still holds only A's drawing.
+    try std.testing.expectEqual(@as(usize, 1), g.player_signs.liveCount());
+    // Refusal is a silent drop: no relay to A, and the ownership counter moved.
+    try std.testing.expect(cap_a.findPkgId(packages.idOf("NetPackageSingleSignData").?) == null);
+    try std.testing.expect(g.harness.counters.get(.ownership_rejects) > rejects_before);
+
+    std.debug.print("PASS sign upload: foreign library refused, store untouched\n", .{});
+}
+
+test "scenario sign: prefab-library upload from a client is refused" {
+    // Prefab libraries are server-side editor content (signs.md §3); stock's
+    // upload path would accept a client push into one (no sender check). zdtd
+    // refuses anything that is not the sender's player library.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+
+    var cap_a: ln_peer.Capture = .{};
+    var cap_b: ln_peer.Capture = .{};
+    const ca = try g.attachJoinedClientAs(&cap_a, .{ .platform = "Steam", .id = "1001" });
+    _ = try g.attachJoinedClientAs(&cap_b, .{ .platform = "Steam", .id = "1002" });
+
+    var mine: [160]u8 = undefined;
+    const a_lib = if (ca.puid_primary.get()) |pid|
+        std.fmt.bufPrint(&mine, "{s}_{s}", .{ pid.platform, pid.id }) catch return error.TestUnexpectedResult
+    else
+        return error.SkipZigTest;
+
+    var blob_buf: [96]u8 = undefined;
+    const a_guid: [16]u8 = @splat(0x11);
+    try injectSignUpload(g, ca, a_lib, try testSignBlob(&blob_buf, a_guid, 2));
+    try std.testing.expectEqual(@as(usize, 1), g.player_signs.liveCount());
+
+    // A prefab library id, with an underscore so it cannot slip past the
+    // player-library shape test without the sender comparison.
+    cap_b.clear();
+    const rejects_before = g.harness.counters.get(.c2s_rejects) + g.harness.counters.get(.ownership_rejects);
+    const p_guid: [16]u8 = @splat(0x33);
+    try injectSignUpload(g, ca, "house_01", try testSignBlob(&blob_buf, p_guid, 2));
+
+    try std.testing.expectEqual(@as(usize, 1), g.player_signs.liveCount());
+    try std.testing.expect(cap_b.findPkgId(packages.idOf("NetPackageSingleSignData").?) == null);
+    const rejects_after = g.harness.counters.get(.c2s_rejects) + g.harness.counters.get(.ownership_rejects);
+    try std.testing.expect(rejects_after > rejects_before);
+
+    std.debug.print("PASS sign upload: prefab library refused\n", .{});
+}
+
+test "scenario sign: join download omits private and includes shareable entries" {
+    // Stock ships every player library, private entries included (signs.md §7).
+    // zdtd delivers what the gallery would show: another player's shareable
+    // drawings only, and the receiver's own library in full. Selectable and
+    // Copyable both mark a drawing shareable; only Private is withheld.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+
+    var cap_a: ln_peer.Capture = .{};
+    var cap_b: ln_peer.Capture = .{};
+    const ca = try g.attachJoinedClientAs(&cap_a, .{ .platform = "Steam", .id = "1001" });
+    const cb = try g.attachJoinedClientAs(&cap_b, .{ .platform = "Steam", .id = "1002" });
+
+    var mine: [160]u8 = undefined;
+    const a_lib = if (ca.puid_primary.get()) |pid|
+        std.fmt.bufPrint(&mine, "{s}_{s}", .{ pid.platform, pid.id }) catch return error.TestUnexpectedResult
+    else
+        return error.SkipZigTest;
+
+    var blob_buf: [96]u8 = undefined;
+    const shared_guid: [16]u8 = @splat(0x44);
+    // One Copyable drawing (SignSharing 2) and one Private (0).
+    try injectSignUpload(g, ca, a_lib, try testSignBlob(&blob_buf, shared_guid, 2));
+    const private_guid: [16]u8 = @splat(0x55);
+    try injectSignUpload(g, ca, a_lib, try testSignBlob(&blob_buf, private_guid, 0));
+    try std.testing.expectEqual(@as(usize, 2), g.player_signs.liveCount());
+
+    // B is not the owner, so only the shareable drawing reaches it.
+    cap_b.clear();
+    var fb: [64]u8 = undefined;
+    try g.injectFramed(cb, try packages.framed(&fb, "NetPackageSignDataRequest", &[_]u8{}));
+    try std.testing.expect(countSignResponseBodiesWith(&cap_b, &shared_guid) > 0);
+    try std.testing.expectEqual(@as(usize, 0), countSignResponseBodiesWith(&cap_b, &private_guid));
+
+    // The owner keeps its own gallery: A still receives the private drawing.
+    cap_a.clear();
+    try g.injectFramed(ca, try packages.framed(&fb, "NetPackageSignDataRequest", &[_]u8{}));
+    try std.testing.expect(countSignResponseBodiesWith(&cap_a, &private_guid) > 0);
+
+    std.debug.print("PASS sign join: private withheld from others, own library intact\n", .{});
 }
 
 test "scenario console: listitems filters and give applies quality" {

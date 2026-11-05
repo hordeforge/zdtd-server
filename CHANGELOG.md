@@ -5,6 +5,15 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Sign library trust gaps closed.** A `NetPackageSingleSignData` upload is
+  accepted only into the sender's own player library, so a client can no longer
+  overwrite or plant drawings in another player's library or a prefab library.
+  The join sign download withholds `Private` drawings from every client but
+  their owner. Both are deliberate divergences from stock; see
+  [DIVERGENCES](docs/DIVERGENCES.md) 1.18/1.19.
+
 ### Changed
 
 - Development builds identify as `0.14.0-dev.1`, keeping the immutable `v0.13.0` release identity exclusive to its tagged commit.

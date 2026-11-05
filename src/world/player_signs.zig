@@ -119,18 +119,20 @@ pub const PlayerSignStore = struct {
         return true;
     }
 
-    /// Iterate the live entries in slot order (for the join batch).
+    /// Iterate the live entries in slot order (for the join batch). `cursor`
+    /// counts the entries already returned; the end returns null. Repeating
+    /// the last entry instead of ending would make a while-until-null caller
+    /// spin, which the join filter does.
     pub fn next(self: *PlayerSignStore, cursor: *usize) ?*PlayerSign {
         var seen: usize = 0;
         var i: usize = 0;
         while (i < max_signs and seen < self.n) : (i += 1) {
             if (!self.used[i]) continue;
-            seen += 1;
-            if (cursor.* == 0) {
-                cursor.* = 1;
+            if (seen == cursor.*) {
+                cursor.* += 1;
                 return &self.items[i];
             }
-            cursor.* -= 1;
+            seen += 1;
         }
         return null;
     }
@@ -242,6 +244,28 @@ test "player sign store round-trips a blob across save and load" {
     defer st3.deinit();
     try st3.load(dir);
     try std.testing.expectEqual(@as(usize, 0), st3.liveCount());
+}
+
+test "player sign store iterator ends after the last live entry" {
+    var st: PlayerSignStore = .{};
+    defer st.deinit();
+    const blob = [_]u8{1};
+    var i: usize = 0;
+    while (i < 3) : (i += 1) {
+        var guid: [16]u8 = @splat(0);
+        guid[0] = @truncate(i + 1);
+        try std.testing.expect(st.put("lib", &guid, &blob) != null);
+    }
+    var cursor: usize = 0;
+    var seen: usize = 0;
+    while (st.next(&cursor)) |_| seen += 1;
+    try std.testing.expectEqual(@as(usize, 3), seen);
+    try std.testing.expectEqual(@as(usize, 3), cursor);
+    // A second pass starts over from the same store, not from the last entry.
+    var again: usize = 0;
+    cursor = 0;
+    while (st.next(&cursor)) |_| again += 1;
+    try std.testing.expectEqual(@as(usize, 3), again);
 }
 
 test "player sign store bounds reject oversized blobs and full stores" {

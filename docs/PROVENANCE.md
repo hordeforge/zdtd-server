@@ -362,7 +362,7 @@ because it globs `.zig`.
 | `src/server/c2s/misc_admin.zig` | R | C2S admin arms (console command, editor volume drop). Split out of misc.zig verbatim |
 | `src/server/c2s/misc_damage.zig` | R | C2S damage arm (kill claims, XP awards, score updates). Split out of misc.zig verbatim |
 | `src/server/c2s/misc_lock.zig` | R | C2S lock arm (lock request gates, container/door lock requests, trader and vending window open, unlock). Split out of misc.zig verbatim |
-| `src/server/c2s/signs.zig` | R | C2S sign-library arm: SingleSignData upload relay + SignDelete ownership check (protocol-packages.md §1.5.2/§1.5.3, gameplay/signs.md §6/§7) |
+| `src/server/c2s/signs.zig` | R | C2S sign-library arm: SingleSignData upload with the sender-library check stock omits + SignDelete ownership check (protocol-packages.md §1.5.2/§1.5.3, gameplay/signs.md §6/§7, DIVERGENCES 1.18) |
 | `src/server/c2s/misc_vehicle.zig` | R | C2S vehicle + attach arms (data sync, spawn control, entity attach). Split out of misc.zig verbatim |
 | `src/server/c2s/misc_wire.zig` | R | C2S wire arms (block wire actions, wire-tool parent ops). Split out of misc.zig verbatim |
 | `src/server/c2s/misc_turret.zig` | R | C2S turret arms (animation-data relay, turret spawn). Split out of misc.zig verbatim |
@@ -527,7 +527,7 @@ because it globs `.zig`.
 | `src/wire/inv_tests.zig` | R | Inventory wire tests (slots, bags, containers). Split out of stock_inv.zig verbatim |
 | `src/wire/stock_party.zig` | R | NetPackagePartyActions (ToServer) + NetPackagePartyData (ToClient) bodies (RE ../7dtd-engine-research/docs/social/parties-factions.md §3) |
 | `src/wire/stock_quest.zig` | R | Stock quest journal + NPCQuestList QuestPacketEntry wire (V3.x). Matches QuestJournal.Write v5, Quest.Write (FileVersion 8), and |
-| `src/wire/stock_sign.zig` | R | Stock NetPackageSignDataResponse body builder (prefab sign libraries). Entry data (`SignEntry`, catalog load) lives in assets/signs.zig; only the |
+| `src/wire/stock_sign.zig` | R | Stock NetPackageSignDataResponse body builder (prefab sign libraries) and the SignData head sharing-byte reader the join filter uses (gameplay/signs.md §2/§5). Entry data (`SignEntry`, catalog load) lives in assets/signs.zig; only the |
 | `src/wire/quest_tests.zig` | R | Quest wire tests (shares, events, objectives). Split out of stock_quest.zig verbatim |
 | `src/server/game/game_events.zig` | R | Runs a parsed gameevents.xml sequence for a player (`GameEventManager` death/respawn semantics: the client's HandleActionClient IL=416 only forwards NetPackageGameEventRequest, the server branch IL_006B executes). Owns the `game_on_death_*`/`game_on_respawn_*` name selection by DeathPenalty (PlayerMoveController IL_0E38, EntityPlayer IL=71), stat writes, death-buff removal with the injured tag exclusion, the AddBuff CVar gate and cvar writes, and the client legs: every `ActionBaseClientAction` action is answered with one NetPackageGameEventResponse ClientSequenceAction (12) keyed by stock's `BaseAction.actionKey` from the parsed order (`SetActionKeyData` IL=23, root `<name><index>`), which is the whole server leg for AddXPDeficit/RemoveItems/AddStartingItems. No stock numbers: the effects come from the parsed table |
 | `src/wire/stock_te.zig` | R | Stock V3.1.0 NetPackageTileEntity payload for composite storage (network modes). |
